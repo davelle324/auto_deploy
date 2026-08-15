@@ -1,0 +1,9 @@
+[MESSAGES CONTROL]
+# R0801 (duplicate-code) fires false positives for legitimate platform-specific
+# clients that share structural similarity but are intentionally separate.
+disable=duplicate-code
+
+[DESIGN]
+# Vercel's create_deployment handles project creation + deployment + error rollback
+# in one method; 16 locals is still clear and readable.
+max-locals=16

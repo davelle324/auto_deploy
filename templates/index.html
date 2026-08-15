@@ -1,0 +1,220 @@
+{% extends "base.html" %}
+{% block title %}Dashboard — Auto Deploy{% endblock %}
+
+{% block content %}
+<h1>Deployments</h1>
+<div class="actions" style="display:flex;gap:.75rem;align-items:center;flex-wrap:wrap;">
+  <a href="/deploy" class="btn btn-primary">+ New Deployment</a>
+  <button class="btn btn-secondary" onclick="loadDeployments(currentPlatform)">Refresh</button>
+</div>
+
+<div id="filter-bar" style="margin:1rem 0;display:flex;gap:.5rem;flex-wrap:wrap;">
+  <button class="btn btn-secondary" data-platform="">All</button>
+  <button class="btn btn-secondary" data-platform="vercel">Vercel</button>
+  <button class="btn btn-secondary" data-platform="netlify">Netlify</button>
+  <button class="btn btn-secondary" data-platform="render">Render</button>
+</div>
+
+<div style="display:flex;gap:.5rem;flex-wrap:wrap;margin-bottom:1rem;">
+  <span style="font-size:13px;color:var(--text-muted);align-self:center;">Import from platform:</span>
+  <button class="btn btn-secondary" style="font-size:13px;" onclick="importFromPlatform('vercel')">← Vercel</button>
+  <button class="btn btn-secondary" style="font-size:13px;" onclick="importFromPlatform('netlify')">← Netlify</button>
+  <button class="btn btn-secondary" style="font-size:13px;" onclick="importFromPlatform('render')">← Render</button>
+</div>
+<div id="import-msg" style="margin-bottom:.75rem;font-size:13px;"></div>
+
+<div id="deployments-list">
+  <p class="loading">Loading deployments…</p>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+  let currentPlatform = "";
+
+  function escHtml(str) {
+    const map = {"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"};
+    return String(str ?? "").replace(/[&<>"']/g, c => map[c]);
+  }
+
+  function badgeClass(status) {
+    const s = (status || "unknown").toLowerCase().replace(/[^a-z_]/g, "");
+    return "badge badge-" + s;
+  }
+
+  function connectRepoPanel(d) {
+    if (d.repo_url) return "";
+    return `
+      <div id="connect-panel-${d.id}" style="margin-top:.75rem;border-top:1px solid var(--border);padding-top:.75rem;">
+        <details>
+          <summary style="cursor:pointer;font-size:13px;color:var(--text-muted);user-select:none;">
+            + Connect a GitHub repo to enable auto-deploys
+          </summary>
+          <div style="display:flex;gap:.5rem;margin-top:.5rem;flex-wrap:wrap;">
+            <input id="repo-input-${d.id}" type="text" placeholder="https://github.com/owner/repo"
+                   style="flex:1;min-width:220px;padding:.4rem .6rem;font-size:13px;
+                          border:1px solid var(--border);border-radius:4px;background:var(--bg-secondary);color:var(--text);">
+            <button class="btn btn-primary" style="font-size:13px;"
+                    onclick="connectRepo(${d.id})">Connect &amp; Deploy</button>
+          </div>
+          <div id="connect-msg-${d.id}" style="margin-top:.4rem;font-size:13px;"></div>
+        </details>
+      </div>`;
+  }
+
+  function renderCard(d) {
+    const domain = d.url ? new URL(d.url).hostname : null;
+    return `
+      <div class="card" id="dep-${d.id}">
+        <div class="card-header">
+          <div>
+            <div class="card-title">${escHtml(d.project_name)}</div>
+            <div class="card-meta">
+              <span class="platform-badge">${escHtml(d.platform)}</span>
+              ${d.created_at ? " · " + new Date(d.created_at).toLocaleString() : ""}
+            </div>
+          </div>
+          <div style="display:flex;align-items:center;gap:.5rem;">
+            <span id="badge-${d.id}" class="${badgeClass(d.status)}">${escHtml(d.status)}</span>
+            <button class="btn btn-secondary" style="padding:.25rem .6rem;font-size:12px;"
+                    title="Sync status from platform" onclick="syncDeployment(${d.id})">↻</button>
+            <button class="btn btn-danger" style="padding:.25rem .6rem;font-size:12px;"
+                    title="Delete on platform and remove from list"
+                    onclick="removeDeployment(${d.id}, '${escHtml(d.platform)}', '${escHtml(d.project_name)}')">✕</button>
+          </div>
+        </div>
+        ${d.url ? `
+          <div class="card-url" style="margin-top:.4rem;">
+            <a href="${escHtml(d.url)}" target="_blank" rel="noopener noreferrer"
+               style="font-weight:500;">${escHtml(domain)}</a>
+            <span style="font-size:11px;color:var(--text-muted);margin-left:.4rem;">(public link)</span>
+          </div>` : ""}
+        ${d.repo_url ? `
+          <div class="card-meta" style="margin-top:.4rem;">
+            Repo: <a href="${escHtml(d.repo_url)}" target="_blank" rel="noopener">${escHtml(d.repo_url)}</a>
+          </div>` : ""}
+        <div id="msg-${d.id}" style="margin-top:.4rem;font-size:13px;"></div>
+        ${connectRepoPanel(d)}
+      </div>`;
+  }
+
+  function renderDeployments(items) {
+    const list = document.getElementById("deployments-list");
+    if (!items.length) {
+      list.innerHTML = `<div class="empty-state">
+        <p>No deployments yet.</p>
+        <a href="/deploy" class="btn btn-primary">Create your first deployment</a>
+      </div>`;
+      return;
+    }
+    list.innerHTML = items.map(renderCard).join("");
+  }
+
+  async function loadDeployments(platform) {
+    const url = "/api/deployments" + (platform ? "?platform=" + platform : "");
+    try {
+      const resp = await fetch(url);
+      if (!resp.ok) throw new Error("Failed to load");
+      renderDeployments(await resp.json());
+    } catch {
+      document.getElementById("deployments-list").innerHTML =
+        '<div class="alert alert-error">Failed to load deployments. Is the server running?</div>';
+    }
+  }
+
+  async function syncDeployment(id) {
+    const badge = document.getElementById("badge-" + id);
+    const msg = document.getElementById("msg-" + id);
+    if (badge) badge.textContent = "syncing…";
+    try {
+      const resp = await fetch("/api/deployments/" + id + "/sync", {method: "POST"});
+      const data = await resp.json();
+      if (!resp.ok) {
+        if (msg) msg.innerHTML = '<span style="color:var(--danger)">' + escHtml(data.detail || "Sync failed") + "</span>";
+        if (badge) badge.textContent = "error";
+      } else {
+        if (badge) { badge.className = badgeClass(data.status); badge.textContent = data.status; }
+        if (msg) msg.innerHTML = '<span style="color:var(--text-muted)">Updated ' + new Date().toLocaleTimeString() + "</span>";
+      }
+    } catch {
+      if (msg) msg.innerHTML = '<span style="color:var(--danger)">Network error</span>';
+    }
+  }
+
+  async function removeDeployment(id, platform, name) {
+    if (!confirm(`Delete "${name}" from ${platform}?\n\nThis will permanently delete the project on ${platform} and remove it from this list.`)) return;
+    const card = document.getElementById("dep-" + id);
+    const msg = document.getElementById("msg-" + id);
+    if (msg) msg.innerHTML = '<span style="color:var(--text-muted)">Deleting on platform…</span>';
+    try {
+      const resp = await fetch("/api/deployments/" + id, {method: "DELETE"});
+      if (resp.ok) {
+        if (card) card.remove();
+        if (!document.querySelector(".card")) loadDeployments(currentPlatform);
+      } else {
+        const data = await resp.json();
+        if (msg) msg.innerHTML = '<span style="color:var(--danger)">' + escHtml(data.detail || "Delete failed") + "</span>";
+      }
+    } catch {
+      if (msg) msg.innerHTML = '<span style="color:var(--danger)">Network error — could not delete.</span>';
+    }
+  }
+
+  async function connectRepo(id) {
+    const input = document.getElementById("repo-input-" + id);
+    const msg = document.getElementById("connect-msg-" + id);
+    const repoUrl = (input ? input.value : "").trim();
+    if (!repoUrl) { if (msg) msg.innerHTML = '<span style="color:var(--danger)">Enter a repo URL first.</span>'; return; }
+    if (msg) msg.innerHTML = '<span style="color:var(--text-muted)">Connecting repo and triggering deployment…</span>';
+    try {
+      const resp = await fetch("/api/deployments/" + id + "/repo", {
+        method: "PATCH",
+        headers: {"Content-Type": "application/json"},
+        body: JSON.stringify({repo_url: repoUrl}),
+      });
+      const data = await resp.json();
+      if (!resp.ok) {
+        if (msg) msg.innerHTML = '<span style="color:var(--danger)">' + escHtml(data.detail || "Failed to connect repo") + "</span>";
+      } else {
+        // Refresh the whole card so the connect panel disappears and URL updates
+        const card = document.getElementById("dep-" + id);
+        if (card) card.outerHTML = renderCard(data);
+      }
+    } catch {
+      if (msg) msg.innerHTML = '<span style="color:var(--danger)">Network error.</span>';
+    }
+  }
+
+  async function importFromPlatform(platform) {
+    const importMsg = document.getElementById("import-msg");
+    importMsg.innerHTML = '<span style="color:var(--text-muted)">Importing from ' + platform + '…</span>';
+    try {
+      const resp = await fetch("/api/deployments/import/" + platform, {method: "POST"});
+      const data = await resp.json();
+      if (!resp.ok) {
+        importMsg.innerHTML = '<span style="color:var(--danger)">' + escHtml(data.detail || "Import failed") + "</span>";
+      } else if (data.length === 0) {
+        importMsg.innerHTML = '<span style="color:var(--text-muted)">No new projects to import from ' + platform + '.</span>';
+        loadDeployments(currentPlatform);
+      } else {
+        importMsg.innerHTML = '<span style="color:var(--success)">Imported ' + data.length + ' project(s) from ' + platform + '.</span>';
+        loadDeployments(currentPlatform);
+      }
+    } catch {
+      importMsg.innerHTML = '<span style="color:var(--danger)">Network error during import.</span>';
+    }
+  }
+
+  document.getElementById("filter-bar").addEventListener("click", e => {
+    const btn = e.target.closest("[data-platform]");
+    if (!btn) return;
+    document.querySelectorAll("#filter-bar button").forEach(b => b.classList.remove("active"));
+    btn.classList.add("active");
+    currentPlatform = btn.dataset.platform;
+    loadDeployments(currentPlatform);
+  });
+
+  document.querySelector('[data-platform=""]').classList.add("active");
+  loadDeployments(currentPlatform);
+</script>
+{% endblock %}

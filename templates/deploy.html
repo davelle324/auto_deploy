@@ -1,0 +1,94 @@
+{% extends "base.html" %}
+{% block title %}New Deployment — Auto Deploy{% endblock %}
+
+{% block content %}
+<h1>New Deployment</h1>
+
+<div id="alert-box"></div>
+
+<div class="card" style="max-width:520px;">
+  <form id="deploy-form">
+    <div class="form-group">
+      <label for="platform">Platform</label>
+      <select id="platform" name="platform" required>
+        <option value="">Select a platform…</option>
+        <option value="vercel">Vercel</option>
+        <option value="netlify">Netlify</option>
+        <option value="render">Render</option>
+      </select>
+    </div>
+
+    <div class="form-group">
+      <label for="project_name">Project Name</label>
+      <input type="text" id="project_name" name="project_name"
+             placeholder="my-project" required
+             pattern="^[a-z0-9][a-z0-9\-]*[a-z0-9]$"
+             title="Lowercase letters, numbers, and hyphens only">
+      <p class="form-hint">Lowercase letters, numbers, hyphens. Max 63 chars.</p>
+    </div>
+
+    <div class="form-group">
+      <label for="repo_url">GitHub Repository URL <span style="color:var(--text-muted);font-weight:400">(optional)</span></label>
+      <input type="url" id="repo_url" name="repo_url"
+             placeholder="https://github.com/owner/repo">
+      <p class="form-hint">Leave blank to create an empty project on the platform.</p>
+    </div>
+
+    <div style="display:flex;gap:.75rem;margin-top:1.5rem;">
+      <button type="submit" class="btn btn-primary" id="submit-btn">Deploy</button>
+      <a href="/" class="btn btn-secondary">Cancel</a>
+    </div>
+  </form>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+  function showAlert(msg, type) {
+    const box = document.getElementById("alert-box");
+    box.innerHTML = `<div class="alert alert-${type}">${escHtml(msg)}</div>`;
+    box.scrollIntoView({behavior:"smooth"});
+  }
+
+  function escHtml(str) {
+    return String(str ?? "").replace(/[&<>"']/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
+  }
+
+  document.getElementById("deploy-form").addEventListener("submit", async e => {
+    e.preventDefault();
+    const btn = document.getElementById("submit-btn");
+    btn.disabled = true;
+    btn.textContent = "Deploying…";
+
+    const platform = document.getElementById("platform").value;
+    const project_name = document.getElementById("project_name").value.trim().toLowerCase();
+    const repo_url = document.getElementById("repo_url").value.trim() || null;
+
+    try {
+      const resp = await fetch("/api/deployments/", {
+        method: "POST",
+        headers: {"Content-Type": "application/json"},
+        body: JSON.stringify({platform, project_name, repo_url}),
+      });
+      const data = await resp.json();
+      if (!resp.ok) {
+        const detail = Array.isArray(data.detail)
+          ? data.detail.map(e => e.msg).join("; ")
+          : (data.detail || "Unknown error");
+        showAlert(detail, "error");
+      } else {
+        showAlert(
+          `Deployment created! ${data.url ? `<a href="${escHtml(data.url)}" target="_blank">View site</a>` : "Check the platform dashboard for your URL."}`,
+          "success"
+        );
+        e.target.reset();
+      }
+    } catch {
+      showAlert("Network error. Is the server running?", "error");
+    } finally {
+      btn.disabled = false;
+      btn.textContent = "Deploy";
+    }
+  });
+</script>
+{% endblock %}

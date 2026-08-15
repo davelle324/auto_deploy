@@ -1,0 +1,94 @@
+{% extends "base.html" %}
+{% block title %}Settings — Auto Deploy{% endblock %}
+
+{% block content %}
+<h1>Settings</h1>
+<h2>Platform API Tokens</h2>
+<p style="color:var(--text-muted);font-size:14px;margin-bottom:1.5rem;">
+  Tokens are encrypted before storage. Generate them from each platform's account settings.
+</p>
+
+<div id="token-grid" class="token-grid">
+  <p class="loading">Loading…</p>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+  function escHtml(str) {
+    return String(str ?? "").replace(/[&<>"']/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
+  }
+
+  async function loadTokens() {
+    const grid = document.getElementById("token-grid");
+    try {
+      const resp = await fetch("/api/tokens/");
+      const tokens = await resp.json();
+      grid.innerHTML = tokens.map(t => `
+        <div class="token-card" id="card-${t.platform}">
+          <div class="token-card-header">
+            <span class="token-card-name">${escHtml(t.platform)}</span>
+            <span class="badge ${t.configured ? "badge-ready" : "badge-unknown"}">
+              ${t.configured ? "configured" : "not set"}
+            </span>
+          </div>
+          ${t.configured && t.created_at ? `<div class="card-meta" style="margin-bottom:.5rem;">Set ${new Date(t.created_at).toLocaleDateString()}</div>` : ""}
+          <div id="msg-${t.platform}"></div>
+          <div class="token-form">
+            <input type="password" id="input-${t.platform}"
+                   placeholder="${t.configured ? "Update token…" : "Paste token…"}">
+            <button class="btn btn-primary" onclick="saveToken('${escHtml(t.platform)}')">
+              ${t.configured ? "Update" : "Save"}
+            </button>
+            ${t.configured ? `<button class="btn btn-danger" onclick="deleteToken('${escHtml(t.platform)}')">Remove</button>` : ""}
+          </div>
+        </div>
+      `).join("");
+    } catch {
+      grid.innerHTML = '<div class="alert alert-error">Failed to load token status.</div>';
+    }
+  }
+
+  async function saveToken(platform) {
+    const input = document.getElementById(`input-${platform}`);
+    const token = input.value.trim();
+    if (!token) return;
+    const msgEl = document.getElementById(`msg-${platform}`);
+    try {
+      const resp = await fetch("/api/tokens/", {
+        method: "POST",
+        headers: {"Content-Type": "application/json"},
+        body: JSON.stringify({platform, token}),
+      });
+      if (resp.ok) {
+        msgEl.innerHTML = '<div class="alert alert-success">Saved.</div>';
+        input.value = "";
+        await loadTokens();
+      } else {
+        const data = await resp.json();
+        msgEl.innerHTML = `<div class="alert alert-error">${escHtml(data.detail || "Error")}</div>`;
+      }
+    } catch {
+      msgEl.innerHTML = '<div class="alert alert-error">Network error.</div>';
+    }
+  }
+
+  async function deleteToken(platform) {
+    if (!confirm(`Remove the ${platform} token?`)) return;
+    const msgEl = document.getElementById(`msg-${platform}`);
+    try {
+      const resp = await fetch(`/api/tokens/${platform}`, {method: "DELETE"});
+      if (resp.ok) {
+        await loadTokens();
+      } else {
+        const data = await resp.json();
+        msgEl.innerHTML = `<div class="alert alert-error">${escHtml(data.detail || "Error")}</div>`;
+      }
+    } catch {
+      msgEl.innerHTML = '<div class="alert alert-error">Network error.</div>';
+    }
+  }
+
+  loadTokens();
+</script>
+{% endblock %}
