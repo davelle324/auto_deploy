@@ -3,7 +3,10 @@
     "allow": [
       "WebSearch",
       "WebFetch(domain:render.com)",
-      "Bash(python *)"
+      "Bash(python *)",
+      "Bash(pip show *)",
+      "Bash(COVERAGE_CORE=pytrace python -m pytest tests/test_deployments.py::test_create_deployment --cov=routers.deployments --cov-report=term-missing -v)",
+      "Bash(COVERAGE_CORE=sysmon python -m coverage run -m pytest tests/test_deployments.py::test_create_deployment -q)"
     ]
   }
 }

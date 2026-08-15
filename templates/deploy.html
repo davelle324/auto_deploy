@@ -34,6 +34,14 @@
       <p class="form-hint">Leave blank to create an empty project on the platform.</p>
     </div>
 
+    <div class="form-group">
+      <label for="project_id">Project <span style="color:var(--text-muted);font-weight:400">(optional)</span></label>
+      <select id="project_id" name="project_id">
+        <option value="">No project</option>
+      </select>
+      <p class="form-hint">Group this deployment under an existing project.</p>
+    </div>
+
     <div style="display:flex;gap:.75rem;margin-top:1.5rem;">
       <button type="submit" class="btn btn-primary" id="submit-btn">Deploy</button>
       <a href="/" class="btn btn-secondary">Cancel</a>
@@ -54,6 +62,21 @@
     return String(str ?? "").replace(/[&<>"']/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
   }
 
+  async function loadProjects() {
+    try {
+      const resp = await fetch("/api/projects/");
+      if (!resp.ok) return;
+      const projects = await resp.json();
+      const sel = document.getElementById("project_id");
+      for (const p of projects) {
+        const opt = document.createElement("option");
+        opt.value = p.id;
+        opt.textContent = p.name;
+        sel.appendChild(opt);
+      }
+    } catch { /* project field is optional — silently ignore */ }
+  }
+
   document.getElementById("deploy-form").addEventListener("submit", async e => {
     e.preventDefault();
     const btn = document.getElementById("submit-btn");
@@ -63,6 +86,7 @@
     const platform = document.getElementById("platform").value;
     const project_name = document.getElementById("project_name").value.trim().toLowerCase();
     const repo_url = document.getElementById("repo_url").value.trim() || null;
+    const project_id = document.getElementById("project_id").value;
 
     try {
       const resp = await fetch("/api/deployments/", {
@@ -77,11 +101,21 @@
           : (data.detail || "Unknown error");
         showAlert(detail, "error");
       } else {
+        if (data.id && project_id) {
+          try {
+            await fetch("/api/deployments/" + data.id + "/project", {
+              method: "PATCH",
+              headers: {"Content-Type": "application/json"},
+              body: JSON.stringify({project_id: parseInt(project_id)}),
+            });
+          } catch { /* ignore — user can assign from dashboard */ }
+        }
         showAlert(
           `Deployment created! ${data.url ? `<a href="${escHtml(data.url)}" target="_blank">View site</a>` : "Check the platform dashboard for your URL."}`,
           "success"
         );
         e.target.reset();
+        await loadProjects();
       }
     } catch {
       showAlert("Network error. Is the server running?", "error");
@@ -90,5 +124,7 @@
       btn.textContent = "Deploy";
     }
   });
+
+  loadProjects();
 </script>
 {% endblock %}

@@ -12,8 +12,8 @@ from integrations.base import PartialDeployError
 from integrations.netlify import NetlifyClient
 from integrations.render import RenderClient
 from integrations.vercel import VercelClient
-from models import Deployment, Platform, PlatformToken
-from schemas import ConnectRepoRequest, DeploymentCreate, DeploymentResponse
+from models import Deployment, Platform, PlatformToken, Project
+from schemas import AssignProjectRequest, ConnectRepoRequest, DeploymentCreate, DeploymentResponse
 from security import decrypt_token
 
 logger = logging.getLogger(__name__)
@@ -263,6 +263,27 @@ async def get_deployment(deployment_id: int, db: AsyncSession = Depends(get_db))
     deployment = result.scalar_one_or_none()
     if not deployment:
         raise HTTPException(status_code=404, detail="Deployment not found")
+    return deployment
+
+
+@router.patch("/{deployment_id}/project", response_model=DeploymentResponse)
+async def assign_project(
+    deployment_id: int, data: AssignProjectRequest, db: AsyncSession = Depends(get_db)
+):
+    """Assign or unassign a deployment to an internal project."""
+    result = await db.execute(select(Deployment).where(Deployment.id == deployment_id))
+    deployment = result.scalar_one_or_none()
+    if not deployment:
+        raise HTTPException(status_code=404, detail="Deployment not found")
+
+    if data.project_id is not None:
+        proj = await db.execute(select(Project).where(Project.id == data.project_id))
+        if not proj.scalar_one_or_none():
+            raise HTTPException(status_code=404, detail="Project not found")
+
+    deployment.project_id = data.project_id
+    await db.commit()
+    await db.refresh(deployment)
     return deployment
 
 

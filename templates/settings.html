@@ -11,6 +11,15 @@
 <div id="token-grid" class="token-grid">
   <p class="loading">Loading…</p>
 </div>
+
+<h2 style="margin-top:2.5rem;">Display Settings</h2>
+<div class="card" style="max-width:480px;">
+  <div class="form-group" style="margin-bottom:0;">
+    <label for="timezone-select">Timezone</label>
+    <select id="timezone-select" onchange="saveTimezone(this.value)"></select>
+    <p class="form-hint">Used when displaying deployment timestamps on the dashboard.</p>
+  </div>
+</div>
 {% endblock %}
 
 {% block scripts %}
@@ -90,5 +99,40 @@
   }
 
   loadTokens();
+
+  // --- Timezone ---
+
+  const TIMEZONES = [
+    {label: "Eastern Time (EST/EDT)", value: "America/New_York"},
+    {label: "Central Time (CST/CDT)", value: "America/Chicago"},
+    {label: "Mountain Time (MST/MDT)", value: "America/Denver"},
+    {label: "Pacific Time (PST/PDT)", value: "America/Los_Angeles"},
+    {label: "Alaska Time", value: "America/Anchorage"},
+    {label: "Hawaii Time", value: "Pacific/Honolulu"},
+    {label: "Atlantic Time", value: "America/Halifax"},
+    {label: "UTC", value: "UTC"},
+    {label: "London (GMT/BST)", value: "Europe/London"},
+    {label: "Paris (CET/CEST)", value: "Europe/Paris"},
+    {label: "Berlin (CET/CEST)", value: "Europe/Berlin"},
+    {label: "Dubai (GST)", value: "Asia/Dubai"},
+    {label: "India (IST)", value: "Asia/Kolkata"},
+    {label: "Singapore (SGT)", value: "Asia/Singapore"},
+    {label: "Tokyo (JST)", value: "Asia/Tokyo"},
+    {label: "Sydney (AEST/AEDT)", value: "Australia/Sydney"},
+  ];
+
+  function loadTimezone() {
+    const saved = localStorage.getItem('timezone') || 'America/New_York';
+    const sel = document.getElementById("timezone-select");
+    sel.innerHTML = TIMEZONES.map(tz =>
+      `<option value="${escHtml(tz.value)}" ${tz.value === saved ? "selected" : ""}>${escHtml(tz.label)}</option>`
+    ).join("");
+  }
+
+  function saveTimezone(value) {
+    localStorage.setItem('timezone', value);
+  }
+
+  loadTimezone();
 </script>
 {% endblock %}

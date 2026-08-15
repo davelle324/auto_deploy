@@ -107,6 +107,40 @@ class DeploymentResponse(BaseModel):
     url: Optional[str] = None
     status: str
     repo_url: Optional[str] = None
+    project_id: Optional[int] = None
     created_at: datetime
 
     model_config = {"from_attributes": True}
+
+
+class ProjectCreate(BaseModel):
+    """Request body for creating an internal project."""
+
+    name: str
+
+    @field_validator("name")
+    @classmethod
+    def validate_name(cls, v: str) -> str:
+        """Reject blank or oversized names."""
+        v = v.strip()
+        if not v:
+            raise ValueError("name cannot be empty")
+        if len(v) > 100:  # noqa: PLR2004
+            raise ValueError("name must be 100 characters or fewer")
+        return v
+
+
+class ProjectResponse(BaseModel):
+    """Response with project details."""
+
+    id: int
+    name: str
+    created_at: datetime
+
+    model_config = {"from_attributes": True}
+
+
+class AssignProjectRequest(BaseModel):
+    """Request body for assigning (or unassigning) a deployment to a project."""
+
+    project_id: Optional[int] = None

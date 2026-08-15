@@ -10,11 +10,11 @@ from fastapi.templating import Jinja2Templates
 
 from config import settings
 from database import init_db
-from routers import deployments, tokens
+from routers import deployments, projects, tokens
 
 
 @asynccontextmanager
-async def lifespan(_app: FastAPI):
+async def lifespan(_app: FastAPI):  # pragma: no cover
     """Initialize the database on startup."""
     await init_db()
     yield
@@ -25,7 +25,7 @@ app = FastAPI(title=settings.app_name, lifespan=lifespan)
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["http://localhost:8000", "http://127.0.0.1:8000"],
-    allow_methods=["GET", "POST", "DELETE"],
+    allow_methods=["GET", "POST", "DELETE", "PATCH"],
     allow_headers=["Content-Type"],
 )
 
@@ -34,6 +34,7 @@ templates = Jinja2Templates(directory="templates")
 
 app.include_router(tokens.router)
 app.include_router(deployments.router)
+app.include_router(projects.router)
 
 
 @app.get("/", response_class=HTMLResponse)

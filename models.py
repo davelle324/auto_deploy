@@ -2,8 +2,9 @@
 
 import enum
 from datetime import datetime, timezone
+from typing import Optional
 
-from sqlalchemy import DateTime, Enum, String, Text
+from sqlalchemy import DateTime, Enum, ForeignKey, String, Text
 from sqlalchemy.orm import Mapped, mapped_column
 
 from database import Base
@@ -36,6 +37,19 @@ class PlatformToken(Base):  # pylint: disable=too-few-public-methods
     )
 
 
+class Project(Base):  # pylint: disable=too-few-public-methods
+    """Internal project grouping for organising deployments across platforms."""
+
+    __tablename__ = "projects"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    name: Mapped[str] = mapped_column(String(100), unique=True, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        default=lambda: datetime.now(timezone.utc),
+    )
+
+
 class Deployment(Base):  # pylint: disable=too-few-public-methods
     """Record of a deployment created via a platform API."""
 
@@ -48,6 +62,9 @@ class Deployment(Base):  # pylint: disable=too-few-public-methods
     url: Mapped[str] = mapped_column(String(512), nullable=True)
     status: Mapped[str] = mapped_column(String(50), default="pending")
     repo_url: Mapped[str] = mapped_column(String(512), nullable=True)
+    project_id: Mapped[Optional[int]] = mapped_column(
+        ForeignKey("projects.id", ondelete="SET NULL"), nullable=True
+    )
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True),
         default=lambda: datetime.now(timezone.utc),

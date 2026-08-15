@@ -5,14 +5,53 @@
 <h1>Deployments</h1>
 <div class="actions" style="display:flex;gap:.75rem;align-items:center;flex-wrap:wrap;">
   <a href="/deploy" class="btn btn-primary">+ New Deployment</a>
-  <button class="btn btn-secondary" onclick="loadDeployments(currentPlatform)">Refresh</button>
+  <button class="btn btn-secondary" onclick="loadAll()">Refresh</button>
 </div>
 
-<div id="filter-bar" style="margin:1rem 0;display:flex;gap:.5rem;flex-wrap:wrap;">
-  <button class="btn btn-secondary" data-platform="">All</button>
-  <button class="btn btn-secondary" data-platform="vercel">Vercel</button>
-  <button class="btn btn-secondary" data-platform="netlify">Netlify</button>
-  <button class="btn btn-secondary" data-platform="render">Render</button>
+<!-- Project management -->
+<div style="margin:1rem 0;display:flex;gap:.5rem;align-items:center;flex-wrap:wrap;">
+  <button class="btn btn-secondary" style="font-size:13px;" onclick="toggleNewProjectForm()">+ New Project</button>
+  <div id="new-project-form" style="display:none;gap:.5rem;align-items:center;flex-wrap:wrap;">
+    <input id="new-project-name" type="text" placeholder="Project name"
+           style="padding:.35rem .6rem;font-size:13px;border:1px solid var(--border);
+                  border-radius:4px;background:var(--bg-secondary,#f5f5f7);color:var(--text);">
+    <button class="btn btn-primary" style="font-size:13px;" onclick="createProject()">Create</button>
+    <button class="btn btn-secondary" style="font-size:13px;" onclick="toggleNewProjectForm()">Cancel</button>
+  </div>
+  <div id="project-msg" style="font-size:13px;"></div>
+</div>
+
+<!-- Filters -->
+<div id="filter-bar" style="margin:.5rem 0 1rem;display:flex;gap:.75rem;align-items:center;flex-wrap:wrap;">
+  <div style="position:relative;display:inline-block;" id="platform-dd-wrap">
+    <button class="btn btn-secondary" id="platform-filter-btn" onclick="togglePlatformDropdown()"
+            style="font-size:13px;min-width:140px;display:flex;align-items:center;justify-content:space-between;gap:.4rem;">
+      <span id="platform-label">All Platforms</span><span style="font-size:10px;">▾</span>
+    </button>
+    <div id="platform-filter-options" style="display:none;position:absolute;top:calc(100% + 4px);left:0;z-index:200;
+         background:var(--card-bg,#fff);border:1px solid var(--border);border-radius:6px;
+         padding:.4rem .6rem;min-width:150px;box-shadow:0 2px 8px rgba(0,0,0,.12);">
+      <label style="display:flex;align-items:center;gap:.4rem;padding:.25rem 0;font-size:13px;cursor:pointer;">
+        <input type="checkbox" id="platform-cb-all" onchange="platformCbAll(this)" checked> All
+      </label>
+      <label style="display:flex;align-items:center;gap:.4rem;padding:.25rem 0;font-size:13px;cursor:pointer;">
+        <input type="checkbox" class="platform-cb" value="vercel" onchange="updatePlatformFilter()"> Vercel
+      </label>
+      <label style="display:flex;align-items:center;gap:.4rem;padding:.25rem 0;font-size:13px;cursor:pointer;">
+        <input type="checkbox" class="platform-cb" value="netlify" onchange="updatePlatformFilter()"> Netlify
+      </label>
+      <label style="display:flex;align-items:center;gap:.4rem;padding:.25rem 0;font-size:13px;cursor:pointer;">
+        <input type="checkbox" class="platform-cb" value="render" onchange="updatePlatformFilter()"> Render
+      </label>
+    </div>
+  </div>
+
+  <select id="project-filter-select" style="font-size:13px;padding:.35rem .6rem;
+         border:1px solid var(--border);border-radius:4px;background:var(--bg-secondary,#f5f5f7);
+         color:var(--text);cursor:pointer;" onchange="setProjectFilter(this.value)">
+    <option value="">All Projects</option>
+    <option value="unassigned">Unassigned only</option>
+  </select>
 </div>
 
 <div style="display:flex;gap:.5rem;flex-wrap:wrap;margin-bottom:1rem;">
@@ -24,13 +63,17 @@
 <div id="import-msg" style="margin-bottom:.75rem;font-size:13px;"></div>
 
 <div id="deployments-list">
-  <p class="loading">Loading deployments…</p>
+  <p class="loading">Loading…</p>
 </div>
 {% endblock %}
 
 {% block scripts %}
 <script>
-  let currentPlatform = "";
+  let selectedPlatforms = new Set();  // empty = all platforms
+  let projectFilter = "";             // "" = all, "unassigned", or "<id>"
+  let allProjects = [];
+  let allDeployments = [];
+  let collapsedProjects = new Set(JSON.parse(localStorage.getItem('collapsedProjects') || '[]'));
 
   const PENDING_STATUSES = new Set(["initializing", "deploying", "building", "queued"]);
   const pollingTimers = {};
@@ -49,16 +92,118 @@
     return String(str ?? "").replace(/[&<>"']/g, c => map[c]);
   }
 
+  function formatDate(isoString) {
+    if (!isoString) return "";
+    const tz = localStorage.getItem('timezone') || 'America/New_York';
+    try {
+      return new Date(isoString).toLocaleString(undefined, {
+        timeZone: tz, month: 'short', day: 'numeric',
+        year: 'numeric', hour: 'numeric', minute: '2-digit'
+      });
+    } catch {
+      return new Date(isoString).toLocaleString();
+    }
+  }
+
   function badgeClass(status) {
     const s = (status || "unknown").toLowerCase().replace(/[^a-z_]/g, "");
     return "badge badge-" + s;
   }
 
-  // Returns the extra bottom section shown on failed or repo-less cards.
+  // --- Platform filter dropdown ---
+
+  function togglePlatformDropdown() {
+    const opts = document.getElementById("platform-filter-options");
+    opts.style.display = opts.style.display === "none" ? "block" : "none";
+  }
+
+  function platformCbAll(cb) {
+    if (cb.checked) {
+      document.querySelectorAll(".platform-cb").forEach(c => { c.checked = false; });
+      selectedPlatforms.clear();
+      updatePlatformLabel();
+      renderDashboard();
+    }
+  }
+
+  function updatePlatformFilter() {
+    const checked = [...document.querySelectorAll(".platform-cb:checked")].map(c => c.value);
+    selectedPlatforms = new Set(checked);
+    document.getElementById("platform-cb-all").checked = checked.length === 0;
+    updatePlatformLabel();
+    renderDashboard();
+  }
+
+  function updatePlatformLabel() {
+    const lbl = document.getElementById("platform-label");
+    if (selectedPlatforms.size === 0) {
+      lbl.textContent = "All Platforms";
+    } else {
+      lbl.textContent = [...selectedPlatforms].map(p => p.charAt(0).toUpperCase() + p.slice(1)).join(", ");
+    }
+  }
+
+  document.addEventListener("click", e => {
+    const wrap = document.getElementById("platform-dd-wrap");
+    if (wrap && !wrap.contains(e.target)) {
+      const opts = document.getElementById("platform-filter-options");
+      if (opts) opts.style.display = "none";
+    }
+  });
+
+  // --- Project filter ---
+
+  function setProjectFilter(value) {
+    projectFilter = value;
+    renderDashboard();
+  }
+
+  function updateProjectFilterSelect() {
+    const sel = document.getElementById("project-filter-select");
+    const current = projectFilter;
+    sel.innerHTML = `<option value="">All Projects</option><option value="unassigned">Unassigned only</option>`;
+    for (const p of allProjects) {
+      const opt = document.createElement("option");
+      opt.value = String(p.id);
+      opt.textContent = p.name;
+      if (current === String(p.id)) opt.selected = true;
+      sel.appendChild(opt);
+    }
+    // If the previously selected project was deleted, reset to all
+    if (current !== "" && current !== "unassigned") {
+      if (!allProjects.some(p => String(p.id) === current)) {
+        projectFilter = "";
+        sel.value = "";
+      }
+    }
+  }
+
+  // --- Collapsible projects ---
+
+  function toggleProjectCollapse(id) {
+    if (collapsedProjects.has(id)) collapsedProjects.delete(id);
+    else collapsedProjects.add(id);
+    localStorage.setItem('collapsedProjects', JSON.stringify([...collapsedProjects]));
+    renderDashboard();
+  }
+
+  // --- Project selector on each card ---
+
+  function projectSelector(d) {
+    const opts = allProjects.map(p =>
+      `<option value="${p.id}" ${d.project_id === p.id ? "selected" : ""}>${escHtml(p.name)}</option>`
+    ).join("");
+    return `<select style="font-size:12px;border:1px solid var(--border);border-radius:4px;
+                            padding:.15rem .35rem;background:var(--bg-secondary,#f5f5f7);color:var(--text);
+                            cursor:pointer;"
+                    onchange="assignProject(${d.id}, this.value)">
+      <option value="">— no project —</option>
+      ${opts}
+    </select>`;
+  }
+
   function repoSection(d) {
     const failed = d.status === "deployment_failed";
-
-    // deployment_failed + has a repo → show Retry button (no re-entry form needed)
     if (failed && d.repo_url) {
       return `
         <div style="margin-top:.75rem;border-top:1px solid var(--border);padding-top:.75rem;display:flex;align-items:center;gap:.75rem;flex-wrap:wrap;">
@@ -68,8 +213,6 @@
           <div id="connect-msg-${d.id}" style="font-size:13px;"></div>
         </div>`;
     }
-
-    // no repo at all → show connect form
     if (!d.repo_url) {
       return `
         <div style="margin-top:.75rem;border-top:1px solid var(--border);padding-top:.75rem;">
@@ -89,7 +232,6 @@
           </details>
         </div>`;
     }
-
     return "";
   }
 
@@ -102,7 +244,7 @@
             <div class="card-title">${escHtml(d.project_name)}</div>
             <div class="card-meta">
               <span class="platform-badge">${escHtml(d.platform)}</span>
-              ${d.created_at ? " · " + new Date(d.created_at).toLocaleString() : ""}
+              ${d.created_at ? " · " + formatDate(d.created_at) : ""}
             </div>
           </div>
           <div style="display:flex;align-items:center;gap:.5rem;">
@@ -131,45 +273,189 @@
             ℹ Git push auto-deploy only works if you've installed the Vercel GitHub App
             (Vercel dashboard → Integrations → GitHub).
           </div>` : ""}` : ""}
+        <div style="margin-top:.4rem;font-size:12px;color:var(--text-muted);display:flex;align-items:center;gap:.4rem;">
+          Project: ${projectSelector(d)}
+        </div>
         <div id="msg-${d.id}" style="margin-top:.4rem;font-size:13px;"></div>
         ${repoSection(d)}
       </div>`;
   }
 
-  function applyPolling(items) {
-    for (const d of items) {
-      if (PENDING_STATUSES.has((d.status || "").toLowerCase())) {
-        startPolling(d.id);
-      } else {
-        stopPolling(d.id);
+  function renderProjectSection(project, deployments) {
+    const isCollapsed = collapsedProjects.has(project.id);
+    const chevron = isCollapsed ? "▶" : "▼";
+    const body = isCollapsed
+      ? ""
+      : (deployments.length
+          ? deployments.map(renderCard).join("")
+          : `<p style="color:var(--text-muted);font-size:13px;padding:.5rem 0;">No deployments in this project yet.</p>`);
+    return `
+      <div style="margin-bottom:1.5rem;">
+        <div style="display:flex;align-items:center;gap:.75rem;margin-bottom:.5rem;padding-bottom:.4rem;
+                    border-bottom:2px solid var(--border);cursor:pointer;user-select:none;"
+             onclick="toggleProjectCollapse(${project.id})">
+          <span style="font-size:11px;color:var(--text-muted);width:10px;flex-shrink:0;">${chevron}</span>
+          <strong style="font-size:15px;">${escHtml(project.name)}</strong>
+          <span style="font-size:12px;color:var(--text-muted);">${deployments.length} deployment${deployments.length !== 1 ? "s" : ""}</span>
+          <button class="btn btn-danger" style="padding:.2rem .5rem;font-size:12px;margin-left:auto;"
+                  onclick="event.stopPropagation(); deleteProject(${project.id}, '${escHtml(project.name)}')">Delete project</button>
+        </div>
+        ${body}
+      </div>`;
+  }
+
+  function renderDashboard() {
+    const list = document.getElementById("deployments-list");
+
+    // Platform filter (client-side)
+    const filtered = selectedPlatforms.size > 0
+      ? allDeployments.filter(d => selectedPlatforms.has(d.platform))
+      : [...allDeployments];
+
+    let html = "";
+
+    if (projectFilter === "unassigned") {
+      const unassigned = filtered.filter(d => !d.project_id);
+      if (unassigned.length) {
+        html = `<div style="margin-bottom:1.5rem;">${unassigned.map(renderCard).join("")}</div>`;
+      }
+    } else if (projectFilter !== "") {
+      const pid = parseInt(projectFilter);
+      const project = allProjects.find(p => p.id === pid);
+      if (project) {
+        const deps = filtered.filter(d => d.project_id === pid);
+        html = renderProjectSection(project, deps);
+      }
+    } else {
+      // All: project sections then unassigned
+      const byProject = new Map();
+      const unassigned = [];
+      for (const d of filtered) {
+        if (d.project_id) {
+          if (!byProject.has(d.project_id)) byProject.set(d.project_id, []);
+          byProject.get(d.project_id).push(d);
+        } else {
+          unassigned.push(d);
+        }
+      }
+
+      for (const project of allProjects) {
+        html += renderProjectSection(project, byProject.get(project.id) || []);
+      }
+
+      if (unassigned.length) {
+        const heading = allProjects.length
+          ? `<div style="display:flex;align-items:center;gap:.75rem;margin-bottom:.5rem;padding-bottom:.4rem;border-bottom:2px solid var(--border);">
+               <strong style="font-size:15px;">Unassigned</strong>
+               <span style="font-size:12px;color:var(--text-muted);">${unassigned.length} deployment${unassigned.length !== 1 ? "s" : ""}</span>
+             </div>`
+          : "";
+        html += `<div style="margin-bottom:1.5rem;">${heading}${unassigned.map(renderCard).join("")}</div>`;
       }
     }
-  }
 
-  function renderDeployments(items) {
-    const list = document.getElementById("deployments-list");
-    if (!items.length) {
-      list.innerHTML = `<div class="empty-state">
-        <p>No deployments yet.</p>
-        <a href="/deploy" class="btn btn-primary">Create your first deployment</a>
-      </div>`;
-      return;
+    if (!html) {
+      html = allDeployments.length
+        ? `<div class="empty-state"><p>No deployments match the current filter.</p></div>`
+        : `<div class="empty-state">
+            <p>No deployments yet.</p>
+            <a href="/deploy" class="btn btn-primary">Create your first deployment</a>
+          </div>`;
     }
-    list.innerHTML = items.map(renderCard).join("");
-    applyPolling(items);
+
+    list.innerHTML = html;
+
+    for (const d of filtered) {
+      if (PENDING_STATUSES.has((d.status || "").toLowerCase())) startPolling(d.id);
+      else stopPolling(d.id);
+    }
   }
 
-  async function loadDeployments(platform) {
-    const url = "/api/deployments" + (platform ? "?platform=" + platform : "");
+  async function loadAll() {
     try {
-      const resp = await fetch(url);
-      if (!resp.ok) throw new Error("Failed to load");
-      renderDeployments(await resp.json());
+      const [projResp, depResp] = await Promise.all([
+        fetch("/api/projects/"),
+        fetch("/api/deployments/"),
+      ]);
+      if (!projResp.ok || !depResp.ok) throw new Error("Failed to load");
+      allProjects = await projResp.json();
+      allDeployments = await depResp.json();
+      updateProjectFilterSelect();
+      renderDashboard();
     } catch {
       document.getElementById("deployments-list").innerHTML =
-        '<div class="alert alert-error">Failed to load deployments. Is the server running?</div>';
+        '<div class="alert alert-error">Failed to load. Is the server running?</div>';
     }
   }
+
+  // --- Projects ---
+
+  function toggleNewProjectForm() {
+    const form = document.getElementById("new-project-form");
+    const hidden = form.style.display === "none" || form.style.display === "";
+    form.style.display = hidden ? "flex" : "none";
+    if (hidden) document.getElementById("new-project-name").focus();
+  }
+
+  async function createProject() {
+    const input = document.getElementById("new-project-name");
+    const msg = document.getElementById("project-msg");
+    const name = input.value.trim();
+    if (!name) { msg.innerHTML = '<span style="color:var(--danger)">Enter a project name.</span>'; return; }
+    try {
+      const resp = await fetch("/api/projects/", {
+        method: "POST",
+        headers: {"Content-Type": "application/json"},
+        body: JSON.stringify({name}),
+      });
+      const data = await resp.json();
+      if (!resp.ok) {
+        msg.innerHTML = '<span style="color:var(--danger)">' + escHtml(data.detail || "Failed") + "</span>";
+      } else {
+        input.value = "";
+        toggleNewProjectForm();
+        msg.innerHTML = '<span style="color:var(--success)">Project created.</span>';
+        setTimeout(() => { msg.innerHTML = ""; }, 2000);
+        await loadAll();
+      }
+    } catch {
+      msg.innerHTML = '<span style="color:var(--danger)">Network error.</span>';
+    }
+  }
+
+  async function deleteProject(id, name) {
+    if (!confirm(`Delete project "${name}"?\n\nDeployments in this project will become unassigned.`)) return;
+    try {
+      const resp = await fetch("/api/projects/" + id, {method: "DELETE"});
+      if (resp.ok) {
+        await loadAll();
+      } else {
+        const data = await resp.json();
+        alert(data.detail || "Delete failed");
+      }
+    } catch {
+      alert("Network error.");
+    }
+  }
+
+  async function assignProject(deploymentId, projectIdStr) {
+    const projectId = projectIdStr === "" ? null : parseInt(projectIdStr, 10);
+    try {
+      const resp = await fetch("/api/deployments/" + deploymentId + "/project", {
+        method: "PATCH",
+        headers: {"Content-Type": "application/json"},
+        body: JSON.stringify({project_id: projectId}),
+      });
+      if (resp.ok) {
+        const data = await resp.json();
+        const idx = allDeployments.findIndex(d => d.id === deploymentId);
+        if (idx !== -1) allDeployments[idx] = data;
+        renderDashboard();
+      }
+    } catch { /* silently ignore — select reverts on next full load */ }
+  }
+
+  // --- Deployment actions ---
 
   async function syncDeployment(id) {
     const badge = document.getElementById("badge-" + id);
@@ -182,19 +468,13 @@
         if (msg) msg.innerHTML = '<span style="color:var(--danger)">' + escHtml(data.detail || "Sync failed") + "</span>";
         if (badge) badge.textContent = "error";
       } else {
-        // Re-render the whole card so the URL, repo link, and status all reflect
-        // the latest values returned by the platform (not just the status badge).
-        const card = document.getElementById("dep-" + id);
-        if (card) {
-          card.outerHTML = renderCard(data);
-          const newMsg = document.getElementById("msg-" + id);
-          if (newMsg) newMsg.innerHTML = '<span style="color:var(--text-muted)">Synced ' + new Date().toLocaleTimeString() + "</span>";
-        }
-        if (PENDING_STATUSES.has((data.status || "").toLowerCase())) {
-          startPolling(id);
-        } else {
-          stopPolling(id);
-        }
+        const idx = allDeployments.findIndex(d => d.id === id);
+        if (idx !== -1) allDeployments[idx] = data;
+        renderDashboard();
+        const newMsg = document.getElementById("msg-" + id);
+        if (newMsg) newMsg.innerHTML = '<span style="color:var(--text-muted)">Synced ' + new Date().toLocaleTimeString() + "</span>";
+        if (PENDING_STATUSES.has((data.status || "").toLowerCase())) startPolling(id);
+        else stopPolling(id);
       }
     } catch {
       if (msg) msg.innerHTML = '<span style="color:var(--danger)">Network error</span>';
@@ -212,12 +492,11 @@
         if (badge) { badge.className = badgeClass("error"); badge.textContent = "error"; }
         if (msg) msg.innerHTML = '<span style="color:var(--danger)">' + escHtml(data.detail || "Redeploy failed") + "</span>";
       } else {
-        const card = document.getElementById("dep-" + id);
-        if (card) {
-          card.outerHTML = renderCard(data);
-          const newMsg = document.getElementById("msg-" + id);
-          if (newMsg) newMsg.innerHTML = '<span style="color:var(--text-muted)">Deployment triggered — status will update automatically.</span>';
-        }
+        const idx = allDeployments.findIndex(d => d.id === id);
+        if (idx !== -1) allDeployments[idx] = data;
+        renderDashboard();
+        const newMsg = document.getElementById("msg-" + id);
+        if (newMsg) newMsg.innerHTML = '<span style="color:var(--text-muted)">Deployment triggered — status will update automatically.</span>';
         if (PENDING_STATUSES.has((data.status || "").toLowerCase())) startPolling(id);
       }
     } catch {
@@ -227,15 +506,14 @@
 
   async function removeDeployment(id, platform, name) {
     if (!confirm(`Delete "${name}" from ${platform}?\n\nThis will permanently delete the project on ${platform} and remove it from this list.`)) return;
-    const card = document.getElementById("dep-" + id);
     const msg = document.getElementById("msg-" + id);
     if (msg) msg.innerHTML = '<span style="color:var(--text-muted)">Deleting on platform…</span>';
     try {
       const resp = await fetch("/api/deployments/" + id, {method: "DELETE"});
       if (resp.ok) {
         stopPolling(id);
-        if (card) card.remove();
-        if (!document.querySelector(".card")) loadDeployments(currentPlatform);
+        allDeployments = allDeployments.filter(d => d.id !== id);
+        renderDashboard();
       } else {
         const data = await resp.json();
         if (msg) msg.innerHTML = '<span style="color:var(--danger)">' + escHtml(data.detail || "Delete failed") + "</span>";
@@ -274,8 +552,9 @@
       if (!resp.ok) {
         if (msg) msg.innerHTML = '<span style="color:var(--danger)">' + escHtml(data.detail || "Failed") + "</span>";
       } else {
-        const card = document.getElementById("dep-" + id);
-        if (card) card.outerHTML = renderCard(data);
+        const idx = allDeployments.findIndex(d => d.id === id);
+        if (idx !== -1) allDeployments[idx] = data;
+        renderDashboard();
         if (PENDING_STATUSES.has((data.status || "").toLowerCase())) startPolling(id);
       }
     } catch {
@@ -293,26 +572,21 @@
         importMsg.innerHTML = '<span style="color:var(--danger)">' + escHtml(data.detail || "Import failed") + "</span>";
       } else if (data.length === 0) {
         importMsg.innerHTML = '<span style="color:var(--text-muted)">No new projects to import from ' + platform + '.</span>';
-        loadDeployments(currentPlatform);
+        await loadAll();
       } else {
         importMsg.innerHTML = '<span style="color:var(--success)">Imported ' + data.length + ' project(s) from ' + platform + '.</span>';
-        loadDeployments(currentPlatform);
+        await loadAll();
       }
     } catch {
       importMsg.innerHTML = '<span style="color:var(--danger)">Network error during import.</span>';
     }
   }
 
-  document.getElementById("filter-bar").addEventListener("click", e => {
-    const btn = e.target.closest("[data-platform]");
-    if (!btn) return;
-    document.querySelectorAll("#filter-bar button").forEach(b => b.classList.remove("active"));
-    btn.classList.add("active");
-    currentPlatform = btn.dataset.platform;
-    loadDeployments(currentPlatform);
+  document.getElementById("new-project-name").addEventListener("keydown", e => {
+    if (e.key === "Enter") createProject();
+    if (e.key === "Escape") toggleNewProjectForm();
   });
 
-  document.querySelector('[data-platform=""]').classList.add("active");
-  loadDeployments(currentPlatform);
+  loadAll();
 </script>
 {% endblock %}
