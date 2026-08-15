@@ -109,6 +109,26 @@ class NetlifyClient(BasePlatformClient):
             project_name=project_name,
         )
 
+    async def redeploy(
+        self,
+        platform_deployment_id: str,
+        project_name: str,
+        repo_url: Optional[str] = None,
+    ) -> DeployResult:
+        """Trigger a new build for an existing Netlify site."""
+        async with httpx.AsyncClient() as client:
+            resp = await client.post(
+                f"{NETLIFY_API}/sites/{platform_deployment_id}/builds",
+                headers=self._headers,
+            )
+            resp.raise_for_status()
+        return DeployResult(
+            platform_deployment_id=platform_deployment_id,
+            url=None,
+            status="building",
+            project_name=project_name,
+        )
+
     async def delete_deployment(
         self, platform_deployment_id: str, project_name: str
     ) -> None:

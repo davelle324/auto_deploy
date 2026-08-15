@@ -123,6 +123,43 @@ async def connect_repo(
     return deployment
 
 
+@router.post("/{deployment_id}/redeploy", response_model=DeploymentResponse)
+async def redeploy_deployment(deployment_id: int, db: AsyncSession = Depends(get_db)):
+    """Trigger a new deployment of the latest commit for an existing project."""
+    result = await db.execute(
+        select(Deployment).where(Deployment.id == deployment_id)
+    )
+    deployment = result.scalar_one_or_none()
+    if not deployment:
+        raise HTTPException(status_code=404, detail="Deployment not found")
+
+    token = await _get_decrypted_token(deployment.platform, db)
+    client = _build_client(deployment.platform, token)
+
+    try:
+        deploy_result = await client.redeploy(
+            deployment.platform_deployment_id,
+            deployment.project_name,
+            deployment.repo_url,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except Exception as exc:
+        body = getattr(getattr(exc, "response", None), "text", None)
+        detail = f"Platform API error: {exc}" + (f" — {body}" if body else "")
+        raise HTTPException(status_code=502, detail=detail) from exc
+
+    deployment.status = deploy_result.status
+    # Update the deployment ID if the platform issued a new one (e.g. Vercel)
+    if deploy_result.platform_deployment_id:
+        deployment.platform_deployment_id = deploy_result.platform_deployment_id
+    if deploy_result.url:
+        deployment.url = deploy_result.url
+    await db.commit()
+    await db.refresh(deployment)
+    return deployment
+
+
 @router.post("/import/{platform}", response_model=list[DeploymentResponse])
 async def import_from_platform(
     platform: Platform, db: AsyncSession = Depends(get_db)
@@ -152,7 +189,7 @@ async def import_from_platform(
             platform_deployment_id=item.platform_deployment_id,
             url=item.url,
             status=item.status,
-            repo_url=None,
+            repo_url=item.repo_url,
         )
         db.add(deployment)
         existing_names.add(item.project_name)
@@ -189,6 +226,13 @@ async def sync_deployment(deployment_id: int, db: AsyncSession = Depends(get_db)
         deployment.status = await client.get_deployment_status(
             deployment.platform_deployment_id
         )
+        actual_url = await client.get_project_url(deployment.project_name)
+        if actual_url:
+            deployment.url = actual_url
+        if not deployment.repo_url:
+            fresh_repo = await client.get_project_repo_url(deployment.project_name)
+            if fresh_repo:
+                deployment.repo_url = fresh_repo
     except Exception as exc:
         raise HTTPException(status_code=502, detail=f"Platform API error: {exc}") from exc
 

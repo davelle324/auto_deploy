@@ -118,7 +118,7 @@ h2 { font-size: 20px; font-weight: 600; margin-bottom: 1rem; }
 }
 .badge-ready, .badge-deployed { background: #d1fae5; color: #065f46; }
 .badge-deploying, .badge-building, .badge-initializing { background: #fef3c7; color: #92400e; }
-.badge-failed, .badge-error { background: #fee2e2; color: #991b1b; }
+.badge-failed, .badge-error, .badge-deployment_failed { background: #fee2e2; color: #991b1b; }
 .badge-pending, .badge-unknown { background: var(--bg); color: var(--text-muted); border: 1px solid var(--border); }
 .badge-requires_repo { background: #ede9fe; color: #5b21b6; }
 

@@ -43,20 +43,75 @@ class VercelClient(BasePlatformClient):
             )
 
     @staticmethod
-    def _stable_url(project_name: str, data: dict) -> str:
-        """Return the stable project alias, falling back to the deployment URL.
+    def _extract_repo_url(proj: dict) -> Optional[str]:
+        """Extract the connected GitHub repo URL from a Vercel project API response.
 
-        Vercel assigns {project-name}.vercel.app as the canonical alias for
-        every project.  The deployment-specific URL (with a random hash) is
-        less useful as it changes with every deployment.
+        Vercel stores the git link under ``project.link`` but the field names
+        vary (``org`` vs ``repoOwner``, plain name vs ``owner/repo`` format).
+        Falls back to ``latestDeployments[0].meta`` commit fields, which are
+        present whenever the most recent deployment came from a GitHub push.
         """
-        aliases = data.get("alias") or []
-        for alias in aliases:
-            if alias.endswith(".vercel.app") and "-" not in alias.split(".")[0].replace(
-                project_name, ""
-            ):
+        link = proj.get("link") or {}
+        if link.get("type", "").lower() == "github":
+            org = link.get("org") or link.get("repoOwner", "")
+            repo_name = link.get("repo") or link.get("repoName", "")
+            if "/" in repo_name and not org:
+                org, repo_name = repo_name.split("/", 1)
+            if org and repo_name:
+                return f"https://github.com/{org}/{repo_name}"
+        latest = (proj.get("latestDeployments") or [{}])[0]
+        meta = latest.get("meta") or {}
+        gh_org = meta.get("githubCommitOrg", "")
+        gh_repo = meta.get("githubCommitRepo", "")
+        if gh_org and gh_repo:
+            return f"https://github.com/{gh_org}/{gh_repo}"
+        return None
+
+    @staticmethod
+    def _pick_production_url(proj: dict) -> Optional[str]:
+        """Return the most stable public URL from a Vercel project API response.
+
+        Skips git-branch aliases (``*-git-*``) which require authentication to visit.
+        If a domain appears in ``proj["alias"]`` the project owns it, so the plain
+        ``{name}.vercel.app`` alias is valid and returned when present.  Falls back to
+        deployment-level aliases when the project alias list is empty or git-branch-only.
+        """
+        # Custom domains (non-vercel.app) always preferred
+        for alias_obj in proj.get("alias", []):
+            domain = alias_obj.get("domain", "")
+            if domain and not domain.endswith(".vercel.app"):
+                return f"https://{domain}"
+        # Stable vercel.app aliases — skip only git-branch aliases
+        for alias_obj in proj.get("alias", []):
+            domain = alias_obj.get("domain", "")
+            if domain and domain.endswith(".vercel.app") and "-git-" not in domain:
+                return f"https://{domain}"
+        # Deployment-level alias fallback (when project alias[] is empty or git-branch-only)
+        plain_alias = f"{proj.get('name', '')}.vercel.app"
+        latest = (proj.get("latestDeployments") or [{}])[0]
+        deploy_url = latest.get("url", "")
+        for alias in latest.get("alias", []):
+            if alias not in (deploy_url, plain_alias) and "-git-" not in alias:
                 return f"https://{alias}"
-        return f"https://{project_name}.vercel.app"
+        return None
+
+    async def _fetch_project_url(
+        self, client: httpx.AsyncClient, project_name: str
+    ) -> Optional[str]:
+        """Fetch the production domain alias for a project from the Vercel API.
+
+        Returns None when the alias hasn't been assigned yet (e.g. the initial
+        deployment is still INITIALIZING).  Callers that need a guaranteed
+        non-null value should use ``get_project_url`` which the sync endpoint
+        calls after deployment completes.
+        """
+        resp = await client.get(
+            f"{VERCEL_API}/v9/projects/{project_name}",
+            headers=self._headers,
+        )
+        if resp.status_code == 200:
+            return self._pick_production_url(resp.json())
+        return None
 
     async def _upload_file(self, client: httpx.AsyncClient, content: bytes) -> str:
         """Pre-upload a file to Vercel and return its SHA1 digest.
@@ -81,6 +136,34 @@ class VercelClient(BasePlatformClient):
             resp.raise_for_status()
         return sha
 
+    async def _link_github_repo(
+        self,
+        client: httpx.AsyncClient,
+        project_name: str,
+        owner: str,
+        repo: str,
+    ) -> None:
+        """PATCH the project to link a GitHub repo and enable auto-deploy on push.
+
+        Uses the ``gitRepository`` field (combined ``owner/repo`` format) which
+        Vercel accepts on ``PATCH /v9/projects/{name}``.  This call is best-effort:
+        if Vercel rejects the field for any reason other than the GitHub App not
+        being installed, we skip silently rather than blocking the deployment.
+        """
+        resp = await client.patch(
+            f"{VERCEL_API}/v9/projects/{project_name}",
+            headers=self._headers,
+            json={
+                "gitRepository": {
+                    "type": "github",
+                    "repo": f"{owner}/{repo}",
+                }
+            },
+        )
+        if resp.status_code == 400:
+            self._check_github_error(resp.json())
+            # Unrecognised 400 (e.g. field not supported yet) — skip silently.
+
     async def _delete_project(self, client: httpx.AsyncClient, project_name: str) -> None:
         """Best-effort project deletion — ignores 404 (already gone)."""
         await safe_delete(client, f"{VERCEL_API}/v9/projects/{project_name}", self._headers)
@@ -90,18 +173,17 @@ class VercelClient(BasePlatformClient):
     ) -> DeployResult:
         """Create a Vercel project and trigger an initial deployment."""
         async with httpx.AsyncClient() as client:
-            project_resp = await client.post(
-                f"{VERCEL_API}/v9/projects",
-                headers=self._headers,
-                json={"name": project_name},
-            )
-            project_resp.raise_for_status()
-
             if repo_url:
-                parts = repo_url.rstrip("/").split("/")
-                owner, repo = parts[-2], parts[-1]
+                *_, owner, repo = repo_url.rstrip("/").split("/")
+                # Include gitRepository at creation time — Vercel installs the
+                # GitHub webhook here, enabling auto-deploy on every push to main.
+                project_json: dict = {
+                    "name": project_name,
+                    "gitRepository": {"type": "github", "repo": f"{owner}/{repo}"},
+                }
                 deploy_payload = {
                     "name": project_name,
+                    "target": "production",
                     "gitSource": {
                         "type": "github",
                         "org": owner,
@@ -110,6 +192,7 @@ class VercelClient(BasePlatformClient):
                     },
                 }
             else:
+                project_json = {"name": project_name}
                 sha = await self._upload_file(client, _PLACEHOLDER_HTML)
                 deploy_payload = {
                     "name": project_name,
@@ -122,6 +205,26 @@ class VercelClient(BasePlatformClient):
                     ],
                     "projectSettings": {"framework": None},
                 }
+
+            project_resp = await client.post(
+                f"{VERCEL_API}/v9/projects",
+                headers=self._headers,
+                json=project_json,
+            )
+            # If gitRepository caused a 400 (GitHub App not installed / no repo
+            # access), fall back to plain project creation so the deployment step
+            # can still run.  That step raises PartialDeployError, which saves the
+            # project to the DB as deployment_failed and shows it in the dashboard.
+            if project_resp.status_code == 400 and repo_url:
+                project_resp = await client.post(
+                    f"{VERCEL_API}/v9/projects",
+                    headers=self._headers,
+                    json={"name": project_name},
+                )
+            project_resp.raise_for_status()
+
+            # Alias from project creation response (set before any deployment runs).
+            url: Optional[str] = self._pick_production_url(project_resp.json())
 
             try:
                 deploy_resp = await client.post(
@@ -149,9 +252,20 @@ class VercelClient(BasePlatformClient):
                 ) from exc
 
             data = deploy_resp.json()
+
+            # URL priority: project creation alias → deployment alias → project fetch
+            # (None is valid — sync button fills this in once deployment reaches READY)
+            if not url:
+                for alias in data.get("alias", []):
+                    if alias and alias != data.get("url") and "-git-" not in alias:
+                        url = f"https://{alias}"
+                        break
+            if not url:
+                url = await self._fetch_project_url(client, project_name)
+
             return DeployResult(
                 platform_deployment_id=data.get("id", project_name),
-                url=self._stable_url(project_name, data),
+                url=url,
                 status=data.get("readyState", "INITIALIZING").lower(),
                 project_name=project_name,
             )
@@ -164,11 +278,14 @@ class VercelClient(BasePlatformClient):
         owner, repo = parts[-2], parts[-1]
 
         async with httpx.AsyncClient() as client:
+            await self._link_github_repo(client, project_name, owner, repo)
+
             deploy_resp = await client.post(
                 f"{VERCEL_API}/v13/deployments",
                 headers=self._headers,
                 json={
                     "name": project_name,
+                    "target": "production",
                     "gitSource": {
                         "type": "github",
                         "org": owner,
@@ -186,13 +303,58 @@ class VercelClient(BasePlatformClient):
 
             return DeployResult(
                 platform_deployment_id=data.get("id", project_name),
-                url=self._stable_url(project_name, data),
+                url=await self._fetch_project_url(client, project_name),
+                status=data.get("readyState", "INITIALIZING").lower(),
+                project_name=project_name,
+            )
+
+    async def redeploy(
+        self,
+        platform_deployment_id: str,
+        project_name: str,
+        repo_url: Optional[str] = None,
+    ) -> DeployResult:
+        """Trigger a new gitSource deployment for an existing Vercel project."""
+        if not repo_url:
+            raise ValueError(
+                "A GitHub repo URL is required to redeploy on Vercel. "
+                "Connect a repo first using the 'Connect & Deploy' option."
+            )
+        *_, owner, repo = repo_url.rstrip("/").split("/")
+
+        async with httpx.AsyncClient() as client:
+            deploy_resp = await client.post(
+                f"{VERCEL_API}/v13/deployments",
+                headers=self._headers,
+                json={
+                    "name": project_name,
+                    "target": "production",
+                    "gitSource": {
+                        "type": "github",
+                        "org": owner,
+                        "repo": repo,
+                        "ref": "main",
+                    },
+                },
+            )
+            if deploy_resp.status_code == 400:
+                self._check_github_error(deploy_resp.json())
+            deploy_resp.raise_for_status()
+            data = deploy_resp.json()
+            return DeployResult(
+                platform_deployment_id=data.get("id", platform_deployment_id),
+                url=await self._fetch_project_url(client, project_name),
                 status=data.get("readyState", "INITIALIZING").lower(),
                 project_name=project_name,
             )
 
     async def list_deployments(self) -> list[DeployResult]:
-        """Return all Vercel projects as DeployResult entries."""
+        """Return all Vercel projects as DeployResult entries.
+
+        Reads each project's `alias` array for the authoritative production URL
+        and `link` for the connected GitHub repo, rather than constructing URLs
+        from the project name.
+        """
         async with httpx.AsyncClient() as client:
             resp = await client.get(
                 f"{VERCEL_API}/v9/projects",
@@ -204,15 +366,35 @@ class VercelClient(BasePlatformClient):
         results = []
         for proj in projects:
             latest = (proj.get("latestDeployments") or [{}])[0]
+            url = self._pick_production_url(proj) or f"https://{proj['name']}.vercel.app"
+            repo_url = self._extract_repo_url(proj)
+
             results.append(
                 DeployResult(
                     platform_deployment_id=latest.get("id") or proj["id"],
-                    url=f"https://{proj['name']}.vercel.app",
+                    url=url,
                     status=latest.get("readyState", "unknown").lower(),
                     project_name=proj["name"],
+                    repo_url=repo_url,
                 )
             )
         return results
+
+    async def get_project_url(self, project_name: str) -> Optional[str]:
+        """Fetch the production alias for an existing Vercel project."""
+        async with httpx.AsyncClient() as client:
+            return await self._fetch_project_url(client, project_name)
+
+    async def get_project_repo_url(self, project_name: str) -> Optional[str]:
+        """Fetch the connected GitHub repo URL for an existing Vercel project."""
+        async with httpx.AsyncClient() as client:
+            resp = await client.get(
+                f"{VERCEL_API}/v9/projects/{project_name}",
+                headers=self._headers,
+            )
+            if resp.status_code == 200:
+                return self._extract_repo_url(resp.json())
+        return None
 
     async def delete_deployment(
         self, platform_deployment_id: str, project_name: str

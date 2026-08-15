@@ -1,0 +1,16 @@
+services:
+  web:
+    build: .
+    ports:
+      - "8000:8000"
+    volumes:
+      - db_data:/app/data
+    env_file:
+      - .env
+    environment:
+      # Override DATABASE_URL so the DB lives in the mounted volume
+      - DATABASE_URL=sqlite+aiosqlite:////app/data/auto_deploy.db
+    restart: unless-stopped
+
+volumes:
+  db_data:

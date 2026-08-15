@@ -1,3 +1,4 @@
+# pylint: disable=missing-module-docstring,missing-function-docstring,invalid-name,redefined-outer-name,line-too-long,unused-argument
 from unittest.mock import AsyncMock, patch
 
 import pytest
@@ -316,6 +317,74 @@ async def test_import_no_token(client):
 
 
 @pytest.mark.asyncio
+async def test_connect_repo(client, mock_deploy_result):
+    """PATCH /{id}/repo triggers a git deployment and updates the record."""
+    await _setup_token(client)
+    with patch("routers.deployments.VercelClient") as MockClient:
+        MockClient.return_value.create_deployment = AsyncMock(return_value=mock_deploy_result)
+        create_resp = await client.post(
+            "/api/deployments/",
+            json={"platform": "vercel", "project_name": "my-project"},
+        )
+    dep_id = create_resp.json()["id"]
+
+    connected = DeployResult(
+        platform_deployment_id="dpl_new",
+        url="https://my-project.vercel.app",
+        status="initializing",
+        project_name="my-project",
+    )
+    with patch("routers.deployments.VercelClient") as MockClient:
+        MockClient.return_value.connect_repo = AsyncMock(return_value=connected)
+        resp = await client.patch(
+            f"/api/deployments/{dep_id}/repo",
+            json={"repo_url": "https://github.com/owner/repo"},
+        )
+
+    assert resp.status_code == 200
+    data = resp.json()
+    assert data["repo_url"] == "https://github.com/owner/repo"
+    assert data["url"] == "https://my-project.vercel.app"
+    assert data["status"] == "initializing"
+
+
+@pytest.mark.asyncio
+async def test_connect_repo_platform_refuses(client, mock_deploy_result):
+    """Platforms that don't support connect_repo return 400."""
+    await _setup_token(client, "render")
+    render_result = DeployResult(
+        platform_deployment_id="srv_abc", url="https://x.onrender.com", status="active", project_name="x"
+    )
+    with patch("routers.deployments.RenderClient") as MockClient:
+        MockClient.return_value.create_deployment = AsyncMock(return_value=render_result)
+        create_resp = await client.post(
+            "/api/deployments/",
+            json={"platform": "render", "project_name": "x", "repo_url": "https://github.com/o/r"},
+        )
+    dep_id = create_resp.json()["id"]
+
+    with patch("routers.deployments.RenderClient") as MockClient:
+        MockClient.return_value.connect_repo = AsyncMock(
+            side_effect=ValueError("Render does not support")
+        )
+        resp = await client.patch(
+            f"/api/deployments/{dep_id}/repo",
+            json={"repo_url": "https://github.com/owner/repo"},
+        )
+
+    assert resp.status_code == 400
+
+
+@pytest.mark.asyncio
+async def test_connect_repo_not_found(client):
+    resp = await client.patch(
+        "/api/deployments/9999/repo",
+        json={"repo_url": "https://github.com/owner/repo"},
+    )
+    assert resp.status_code == 404
+
+
+@pytest.mark.asyncio
 async def test_sync_deployment(client, mock_deploy_result):
     await _setup_token(client)
     with patch("routers.deployments.VercelClient") as MockClient:
@@ -328,6 +397,8 @@ async def test_sync_deployment(client, mock_deploy_result):
 
     with patch("routers.deployments.VercelClient") as MockClient:
         MockClient.return_value.get_deployment_status = AsyncMock(return_value="ready")
+        MockClient.return_value.get_project_url = AsyncMock(return_value=None)
+        MockClient.return_value.get_project_repo_url = AsyncMock(return_value=None)
         resp = await client.post(f"/api/deployments/{dep_id}/sync")
 
     assert resp.status_code == 200
@@ -338,6 +409,53 @@ async def test_sync_deployment(client, mock_deploy_result):
 async def test_sync_deployment_not_found(client):
     resp = await client.post("/api/deployments/9999/sync")
     assert resp.status_code == 404
+
+
+@pytest.mark.asyncio
+async def test_sync_updates_url_from_platform(client, mock_deploy_result):
+    """Sync should update the stored URL via get_project_url if the platform returns one."""
+    await _setup_token(client)
+    with patch("routers.deployments.VercelClient") as MockClient:
+        MockClient.return_value.create_deployment = AsyncMock(return_value=mock_deploy_result)
+        create_resp = await client.post(
+            "/api/deployments/",
+            json={"platform": "vercel", "project_name": "my-project"},
+        )
+    dep_id = create_resp.json()["id"]
+
+    with patch("routers.deployments.VercelClient") as MockClient:
+        MockClient.return_value.get_deployment_status = AsyncMock(return_value="ready")
+        MockClient.return_value.get_project_url = AsyncMock(
+            return_value="https://my-project-team.vercel.app"
+        )
+        MockClient.return_value.get_project_repo_url = AsyncMock(return_value=None)
+        resp = await client.post(f"/api/deployments/{dep_id}/sync")
+
+    assert resp.status_code == 200
+    assert resp.json()["url"] == "https://my-project-team.vercel.app"
+
+
+@pytest.mark.asyncio
+async def test_import_includes_repo_url(client):
+    """Import should preserve the repo_url from the platform when available."""
+    await _setup_token(client)
+    remote_results = [
+        DeployResult(
+            platform_deployment_id="dpl_imported",
+            url="https://imported.vercel.app",
+            status="ready",
+            project_name="imported-site",
+            repo_url="https://github.com/owner/imported-repo",
+        )
+    ]
+    with patch("routers.deployments.VercelClient") as MockClient:
+        MockClient.return_value.list_deployments = AsyncMock(return_value=remote_results)
+        resp = await client.post("/api/deployments/import/vercel")
+
+    assert resp.status_code == 200
+    data = resp.json()
+    assert len(data) == 1
+    assert data[0]["repo_url"] == "https://github.com/owner/imported-repo"
 
 
 @pytest.mark.asyncio
@@ -355,5 +473,88 @@ async def test_sync_deployment_platform_error(client, mock_deploy_result):
         MockClient.return_value.get_deployment_status = AsyncMock(
             side_effect=Exception("platform down")
         )
+        MockClient.return_value.get_project_url = AsyncMock(return_value=None)
+        MockClient.return_value.get_project_repo_url = AsyncMock(return_value=None)
         resp = await client.post(f"/api/deployments/{dep_id}/sync")
     assert resp.status_code == 502
+
+
+@pytest.mark.asyncio
+async def test_sync_updates_repo_url_from_platform(client, mock_deploy_result):
+    """Sync should backfill repo_url via get_project_repo_url when it is unset."""
+    await _setup_token(client)
+    with patch("routers.deployments.VercelClient") as MockClient:
+        MockClient.return_value.create_deployment = AsyncMock(return_value=mock_deploy_result)
+        create_resp = await client.post(
+            "/api/deployments/",
+            json={"platform": "vercel", "project_name": "my-project"},
+        )
+    dep_id = create_resp.json()["id"]
+    assert create_resp.json()["repo_url"] is None
+
+    with patch("routers.deployments.VercelClient") as MockClient:
+        MockClient.return_value.get_deployment_status = AsyncMock(return_value="ready")
+        MockClient.return_value.get_project_url = AsyncMock(return_value=None)
+        MockClient.return_value.get_project_repo_url = AsyncMock(
+            return_value="https://github.com/owner/my-repo"
+        )
+        resp = await client.post(f"/api/deployments/{dep_id}/sync")
+
+    assert resp.status_code == 200
+    assert resp.json()["repo_url"] == "https://github.com/owner/my-repo"
+
+
+@pytest.mark.asyncio
+async def test_redeploy_deployment(client, mock_deploy_result):
+    """Redeploy endpoint triggers a new deployment and updates status/ID."""
+    await _setup_token(client)
+    redeploy_result = DeployResult(
+        platform_deployment_id="dpl_new456",
+        url=None,
+        status="initializing",
+        project_name="my-project",
+    )
+    with patch("routers.deployments.VercelClient") as MockClient:
+        MockClient.return_value.create_deployment = AsyncMock(return_value=mock_deploy_result)
+        create_resp = await client.post(
+            "/api/deployments/",
+            json={"platform": "vercel", "project_name": "my-project"},
+        )
+    dep_id = create_resp.json()["id"]
+
+    with patch("routers.deployments.VercelClient") as MockClient:
+        MockClient.return_value.redeploy = AsyncMock(return_value=redeploy_result)
+        resp = await client.post(f"/api/deployments/{dep_id}/redeploy")
+
+    assert resp.status_code == 200
+    data = resp.json()
+    assert data["status"] == "initializing"
+    assert data["platform_deployment_id"] == "dpl_new456"
+
+
+@pytest.mark.asyncio
+async def test_redeploy_deployment_not_found(client):
+    resp = await client.post("/api/deployments/9999/redeploy")
+    assert resp.status_code == 404
+
+
+@pytest.mark.asyncio
+async def test_redeploy_deployment_platform_error(client, mock_deploy_result):
+    """A ValueError from the platform client surfaces as a 400."""
+    await _setup_token(client)
+    with patch("routers.deployments.VercelClient") as MockClient:
+        MockClient.return_value.create_deployment = AsyncMock(return_value=mock_deploy_result)
+        create_resp = await client.post(
+            "/api/deployments/",
+            json={"platform": "vercel", "project_name": "my-project"},
+        )
+    dep_id = create_resp.json()["id"]
+
+    with patch("routers.deployments.VercelClient") as MockClient:
+        MockClient.return_value.redeploy = AsyncMock(
+            side_effect=ValueError("A GitHub repo URL is required to redeploy on Vercel.")
+        )
+        resp = await client.post(f"/api/deployments/{dep_id}/redeploy")
+
+    assert resp.status_code == 400
+    assert "repo URL" in resp.json()["detail"]

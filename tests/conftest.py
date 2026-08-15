@@ -1,5 +1,7 @@
 """Pytest configuration and shared fixtures for async FastAPI tests."""
 
+# pylint: disable=wrong-import-position,wrong-import-order,redefined-outer-name
+
 import os
 
 # Must be set before any app module imports so config/database use these values.

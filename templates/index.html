@@ -32,6 +32,18 @@
 <script>
   let currentPlatform = "";
 
+  const PENDING_STATUSES = new Set(["initializing", "deploying", "building", "queued"]);
+  const pollingTimers = {};
+
+  function startPolling(id) {
+    if (pollingTimers[id]) return;
+    pollingTimers[id] = setInterval(() => syncDeployment(id), 5000);
+  }
+
+  function stopPolling(id) {
+    if (pollingTimers[id]) { clearInterval(pollingTimers[id]); delete pollingTimers[id]; }
+  }
+
   function escHtml(str) {
     const map = {"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"};
     return String(str ?? "").replace(/[&<>"']/g, c => map[c]);
@@ -42,28 +54,47 @@
     return "badge badge-" + s;
   }
 
-  function connectRepoPanel(d) {
-    if (d.repo_url) return "";
-    return `
-      <div id="connect-panel-${d.id}" style="margin-top:.75rem;border-top:1px solid var(--border);padding-top:.75rem;">
-        <details>
-          <summary style="cursor:pointer;font-size:13px;color:var(--text-muted);user-select:none;">
-            + Connect a GitHub repo to enable auto-deploys
-          </summary>
-          <div style="display:flex;gap:.5rem;margin-top:.5rem;flex-wrap:wrap;">
-            <input id="repo-input-${d.id}" type="text" placeholder="https://github.com/owner/repo"
-                   style="flex:1;min-width:220px;padding:.4rem .6rem;font-size:13px;
-                          border:1px solid var(--border);border-radius:4px;background:var(--bg-secondary);color:var(--text);">
-            <button class="btn btn-primary" style="font-size:13px;"
-                    onclick="connectRepo(${d.id})">Connect &amp; Deploy</button>
-          </div>
-          <div id="connect-msg-${d.id}" style="margin-top:.4rem;font-size:13px;"></div>
-        </details>
-      </div>`;
+  // Returns the extra bottom section shown on failed or repo-less cards.
+  function repoSection(d) {
+    const failed = d.status === "deployment_failed";
+
+    // deployment_failed + has a repo → show Retry button (no re-entry form needed)
+    if (failed && d.repo_url) {
+      return `
+        <div style="margin-top:.75rem;border-top:1px solid var(--border);padding-top:.75rem;display:flex;align-items:center;gap:.75rem;flex-wrap:wrap;">
+          <span style="font-size:13px;color:var(--text-muted);">Deployment failed — fix the GitHub App, then:</span>
+          <button class="btn btn-primary" style="font-size:13px;"
+                  onclick="retryDeployment(${d.id}, '${escHtml(d.repo_url)}')">↻ Retry Deployment</button>
+          <div id="connect-msg-${d.id}" style="font-size:13px;"></div>
+        </div>`;
+    }
+
+    // no repo at all → show connect form
+    if (!d.repo_url) {
+      return `
+        <div style="margin-top:.75rem;border-top:1px solid var(--border);padding-top:.75rem;">
+          <details ${failed ? "open" : ""}>
+            <summary style="cursor:pointer;font-size:13px;color:var(--text-muted);user-select:none;">
+              + Connect a GitHub repo to enable auto-deploys
+            </summary>
+            <div style="display:flex;gap:.5rem;margin-top:.5rem;flex-wrap:wrap;">
+              <input id="repo-input-${d.id}" type="text" placeholder="https://github.com/owner/repo"
+                     style="flex:1;min-width:220px;padding:.4rem .6rem;font-size:13px;
+                            border:1px solid var(--border);border-radius:4px;
+                            background:var(--bg-secondary,#f5f5f7);color:var(--text);">
+              <button class="btn btn-primary" style="font-size:13px;"
+                      onclick="connectRepo(${d.id})">Connect &amp; Deploy</button>
+            </div>
+            <div id="connect-msg-${d.id}" style="margin-top:.4rem;font-size:13px;"></div>
+          </details>
+        </div>`;
+    }
+
+    return "";
   }
 
   function renderCard(d) {
-    const domain = d.url ? new URL(d.url).hostname : null;
+    const domain = d.url ? (() => { try { return new URL(d.url).hostname; } catch { return d.url; } })() : null;
     return `
       <div class="card" id="dep-${d.id}">
         <div class="card-header">
@@ -78,24 +109,41 @@
             <span id="badge-${d.id}" class="${badgeClass(d.status)}">${escHtml(d.status)}</span>
             <button class="btn btn-secondary" style="padding:.25rem .6rem;font-size:12px;"
                     title="Sync status from platform" onclick="syncDeployment(${d.id})">↻</button>
+            <button class="btn btn-secondary" style="padding:.25rem .6rem;font-size:12px;"
+                    title="Deploy latest commit" onclick="redeployDeployment(${d.id})">▶ Deploy</button>
             <button class="btn btn-danger" style="padding:.25rem .6rem;font-size:12px;"
                     title="Delete on platform and remove from list"
                     onclick="removeDeployment(${d.id}, '${escHtml(d.platform)}', '${escHtml(d.project_name)}')">✕</button>
           </div>
         </div>
-        ${d.url ? `
-          <div class="card-url" style="margin-top:.4rem;">
+        ${domain ? `
+          <div style="margin-top:.4rem;">
             <a href="${escHtml(d.url)}" target="_blank" rel="noopener noreferrer"
-               style="font-weight:500;">${escHtml(domain)}</a>
-            <span style="font-size:11px;color:var(--text-muted);margin-left:.4rem;">(public link)</span>
+               style="font-weight:500;font-size:14px;">${escHtml(domain)}</a>
+            <span style="font-size:11px;color:var(--text-muted);margin-left:.4rem;">↗ public link</span>
           </div>` : ""}
         ${d.repo_url ? `
           <div class="card-meta" style="margin-top:.4rem;">
             Repo: <a href="${escHtml(d.repo_url)}" target="_blank" rel="noopener">${escHtml(d.repo_url)}</a>
-          </div>` : ""}
+          </div>
+          ${d.platform === "vercel" ? `
+          <div style="margin-top:.25rem;font-size:11px;color:var(--text-muted);">
+            ℹ Git push auto-deploy only works if you've installed the Vercel GitHub App
+            (Vercel dashboard → Integrations → GitHub).
+          </div>` : ""}` : ""}
         <div id="msg-${d.id}" style="margin-top:.4rem;font-size:13px;"></div>
-        ${connectRepoPanel(d)}
+        ${repoSection(d)}
       </div>`;
+  }
+
+  function applyPolling(items) {
+    for (const d of items) {
+      if (PENDING_STATUSES.has((d.status || "").toLowerCase())) {
+        startPolling(d.id);
+      } else {
+        stopPolling(d.id);
+      }
+    }
   }
 
   function renderDeployments(items) {
@@ -108,6 +156,7 @@
       return;
     }
     list.innerHTML = items.map(renderCard).join("");
+    applyPolling(items);
   }
 
   async function loadDeployments(platform) {
@@ -133,8 +182,43 @@
         if (msg) msg.innerHTML = '<span style="color:var(--danger)">' + escHtml(data.detail || "Sync failed") + "</span>";
         if (badge) badge.textContent = "error";
       } else {
-        if (badge) { badge.className = badgeClass(data.status); badge.textContent = data.status; }
-        if (msg) msg.innerHTML = '<span style="color:var(--text-muted)">Updated ' + new Date().toLocaleTimeString() + "</span>";
+        // Re-render the whole card so the URL, repo link, and status all reflect
+        // the latest values returned by the platform (not just the status badge).
+        const card = document.getElementById("dep-" + id);
+        if (card) {
+          card.outerHTML = renderCard(data);
+          const newMsg = document.getElementById("msg-" + id);
+          if (newMsg) newMsg.innerHTML = '<span style="color:var(--text-muted)">Synced ' + new Date().toLocaleTimeString() + "</span>";
+        }
+        if (PENDING_STATUSES.has((data.status || "").toLowerCase())) {
+          startPolling(id);
+        } else {
+          stopPolling(id);
+        }
+      }
+    } catch {
+      if (msg) msg.innerHTML = '<span style="color:var(--danger)">Network error</span>';
+    }
+  }
+
+  async function redeployDeployment(id) {
+    const badge = document.getElementById("badge-" + id);
+    const msg = document.getElementById("msg-" + id);
+    if (badge) badge.textContent = "deploying…";
+    try {
+      const resp = await fetch("/api/deployments/" + id + "/redeploy", {method: "POST"});
+      const data = await resp.json();
+      if (!resp.ok) {
+        if (badge) { badge.className = badgeClass("error"); badge.textContent = "error"; }
+        if (msg) msg.innerHTML = '<span style="color:var(--danger)">' + escHtml(data.detail || "Redeploy failed") + "</span>";
+      } else {
+        const card = document.getElementById("dep-" + id);
+        if (card) {
+          card.outerHTML = renderCard(data);
+          const newMsg = document.getElementById("msg-" + id);
+          if (newMsg) newMsg.innerHTML = '<span style="color:var(--text-muted)">Deployment triggered — status will update automatically.</span>';
+        }
+        if (PENDING_STATUSES.has((data.status || "").toLowerCase())) startPolling(id);
       }
     } catch {
       if (msg) msg.innerHTML = '<span style="color:var(--danger)">Network error</span>';
@@ -149,6 +233,7 @@
     try {
       const resp = await fetch("/api/deployments/" + id, {method: "DELETE"});
       if (resp.ok) {
+        stopPolling(id);
         if (card) card.remove();
         if (!document.querySelector(".card")) loadDeployments(currentPlatform);
       } else {
@@ -164,8 +249,21 @@
     const input = document.getElementById("repo-input-" + id);
     const msg = document.getElementById("connect-msg-" + id);
     const repoUrl = (input ? input.value : "").trim();
-    if (!repoUrl) { if (msg) msg.innerHTML = '<span style="color:var(--danger)">Enter a repo URL first.</span>'; return; }
-    if (msg) msg.innerHTML = '<span style="color:var(--text-muted)">Connecting repo and triggering deployment…</span>';
+    if (!repoUrl) {
+      if (msg) msg.innerHTML = '<span style="color:var(--danger)">Enter a repo URL first.</span>';
+      return;
+    }
+    if (msg) msg.innerHTML = '<span style="color:var(--text-muted)">Connecting repo and deploying…</span>';
+    await _patchRepo(id, repoUrl, msg);
+  }
+
+  async function retryDeployment(id, repoUrl) {
+    const msg = document.getElementById("connect-msg-" + id);
+    if (msg) msg.innerHTML = '<span style="color:var(--text-muted)">Retrying deployment…</span>';
+    await _patchRepo(id, repoUrl, msg);
+  }
+
+  async function _patchRepo(id, repoUrl, msg) {
     try {
       const resp = await fetch("/api/deployments/" + id + "/repo", {
         method: "PATCH",
@@ -174,11 +272,11 @@
       });
       const data = await resp.json();
       if (!resp.ok) {
-        if (msg) msg.innerHTML = '<span style="color:var(--danger)">' + escHtml(data.detail || "Failed to connect repo") + "</span>";
+        if (msg) msg.innerHTML = '<span style="color:var(--danger)">' + escHtml(data.detail || "Failed") + "</span>";
       } else {
-        // Refresh the whole card so the connect panel disappears and URL updates
         const card = document.getElementById("dep-" + id);
         if (card) card.outerHTML = renderCard(data);
+        if (PENDING_STATUSES.has((data.status || "").toLowerCase())) startPolling(id);
       }
     } catch {
       if (msg) msg.innerHTML = '<span style="color:var(--danger)">Network error.</span>';

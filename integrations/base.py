@@ -1,7 +1,7 @@
 """Abstract base class and shared result type for platform API clients."""
 
 from abc import ABC, abstractmethod
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Optional
 
 import httpx
@@ -15,6 +15,7 @@ class DeployResult:
     url: Optional[str]
     status: str
     project_name: str = ""
+    repo_url: Optional[str] = field(default=None)
 
 
 async def safe_delete(client: httpx.AsyncClient, url: str, headers: dict) -> None:
@@ -66,3 +67,36 @@ class BasePlatformClient(ABC):
     @abstractmethod
     async def get_deployment_status(self, deployment_id: str) -> str:
         """Return the current status string for an existing deployment."""
+
+    async def redeploy(
+        self,
+        platform_deployment_id: str,
+        project_name: str,
+        repo_url: Optional[str] = None,
+    ) -> DeployResult:
+        """Trigger a new deployment of the latest commit on the platform.
+
+        The default implementation raises ValueError; platforms that support
+        manual redeploy override this method.
+        """
+        _ = platform_deployment_id, project_name, repo_url
+        raise ValueError("Manual redeploy is not supported for this platform.")
+
+    async def get_project_url(self, project_name: str) -> Optional[str]:
+        """Return the stable production URL for an existing project.
+
+        Returns None if the platform client does not implement URL resolution.
+        Subclasses override this to fetch the authoritative domain from the
+        platform API rather than constructing a guessed URL.
+        """
+        _ = project_name
+        return None
+
+    async def get_project_repo_url(self, project_name: str) -> Optional[str]:
+        """Return the connected GitHub repo URL for an existing project.
+
+        Returns None if the platform client does not support this query.
+        Subclasses override this to fetch the repo link from the platform API.
+        """
+        _ = project_name
+        return None
