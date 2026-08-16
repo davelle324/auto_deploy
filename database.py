@@ -1,6 +1,6 @@
 """Async SQLAlchemy engine, session factory, and database initialization."""
 
-from sqlalchemy import text
+from sqlalchemy import event, text
 from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 from sqlalchemy.orm import DeclarativeBase
 
@@ -8,6 +8,13 @@ from config import settings
 
 engine = create_async_engine(settings.database_url, echo=settings.debug)
 session_factory = async_sessionmaker(engine, expire_on_commit=False)
+
+
+@event.listens_for(engine.sync_engine, "connect")
+def _set_sqlite_pragma(dbapi_conn, _connection_record):
+    cursor = dbapi_conn.cursor()
+    cursor.execute("PRAGMA foreign_keys=ON")
+    cursor.close()
 
 
 class Base(DeclarativeBase):  # pylint: disable=too-few-public-methods

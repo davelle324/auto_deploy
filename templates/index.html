@@ -347,8 +347,14 @@
     return "";
   }
 
+  function platformDashUrl(d) {
+    if (d.platform === "netlify") return `https://app.netlify.com/sites/${encodeURIComponent(d.project_name)}`;
+    if (d.platform === "render")  return `https://dashboard.render.com/static/${encodeURIComponent(d.platform_deployment_id)}`;
+    return "https://vercel.com/dashboard";
+  }
+
   function renderCard(d) {
-    const domain = d.url ? (() => { try { return new URL(d.url).hostname; } catch { return d.url; } })() : null;
+    const repoShort = d.repo_url ? d.repo_url.replace(/^https?:\/\/(www\.)?github\.com\//, "") : null;
     return `
       <div class="card platform-${d.platform}" id="dep-${d.id}">
         <div class="card-header">
@@ -385,21 +391,15 @@
             </div>
           </div>
         </div>
-        ${domain ? `
-          <div style="margin-top:.4rem;">
-            <a href="${escHtml(d.url)}" target="_blank" rel="noopener noreferrer"
-               style="font-weight:500;font-size:14px;">${escHtml(domain)}</a>
-            <span style="font-size:11px;color:var(--text-muted);margin-left:.4rem;">↗ public link</span>
+        <div class="card-links">
+          ${d.url ? `<a href="${escHtml(d.url)}" target="_blank" rel="noopener noreferrer" class="card-link-chip" title="Open live site"><em class="chip-icon">↗</em> Live site</a>` : ""}
+          <a href="${escHtml(platformDashUrl(d))}" target="_blank" rel="noopener noreferrer" class="card-link-chip" title="Open ${escHtml(d.platform)} dashboard"><em class="chip-icon">⊞</em> ${escHtml(d.platform[0].toUpperCase() + d.platform.slice(1))} dashboard</a>
+          ${d.repo_url ? `<a href="${escHtml(d.repo_url)}" target="_blank" rel="noopener" class="card-link-chip" title="Open GitHub repo"><em class="chip-icon">⎇</em> ${escHtml(repoShort)}</a>` : ""}
+        </div>
+        ${d.platform === "vercel" && d.repo_url ? `
+          <div style="margin-top:.3rem;font-size:11px;color:var(--text-muted);">
+            ℹ Auto-deploy on push requires the Vercel GitHub App (Vercel dashboard → Integrations → GitHub).
           </div>` : ""}
-        ${d.repo_url ? `
-          <div class="card-meta" style="margin-top:.4rem;">
-            Repo: <a href="${escHtml(d.repo_url)}" target="_blank" rel="noopener">${escHtml(d.repo_url)}</a>
-          </div>
-          ${d.platform === "vercel" ? `
-          <div style="margin-top:.25rem;font-size:11px;color:var(--text-muted);">
-            ℹ Git push auto-deploy only works if you've installed the Vercel GitHub App
-            (Vercel dashboard → Integrations → GitHub).
-          </div>` : ""}` : ""}
         <div style="margin-top:.4rem;font-size:12px;color:var(--text-muted);display:flex;align-items:center;gap:.4rem;">
           Project: ${projectSelector(d)}
         </div>

@@ -318,6 +318,26 @@ h2 { font-size: 18px; font-weight: 600; letter-spacing: -.2px; margin-bottom: .9
 .badge-requires_repo                   { background: #ede9fe; color: #5b21b6; }
 [data-theme="dark"] .badge-requires_repo { background: #1e1240; color: #c4b5fd; }
 
+/* ── Card link chips ──────────────────────────────────────────────────────── */
+.card-links { display: flex; flex-wrap: wrap; gap: .35rem; margin-top: .55rem; }
+.card-link-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: .3rem;
+  padding: .2rem .6rem;
+  border-radius: 10px;
+  font-size: 11.5px;
+  font-weight: 500;
+  text-decoration: none;
+  white-space: nowrap;
+  background: var(--surface-raised);
+  color: var(--text-muted);
+  border: 1px solid var(--border);
+  transition: background .15s, color .15s, border-color .15s;
+}
+.card-link-chip:hover { background: var(--accent); color: #fff; border-color: var(--accent); }
+.card-link-chip .chip-icon { font-style: normal; font-size: 12px; }
+
 /* ── Platform badges ──────────────────────────────────────────────────────── */
 .platform-badge {
   display: inline-flex;
