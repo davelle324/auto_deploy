@@ -4,7 +4,7 @@ from typing import Optional
 
 import httpx
 
-from integrations.base import BasePlatformClient, DeployResult, safe_delete
+from integrations.base import BasePlatformClient, DeployResult, build_result, normalize_status, safe_delete
 
 RENDER_API = "https://api.render.com/v1"
 
@@ -85,10 +85,16 @@ class RenderClient(BasePlatformClient):
                     d = get_resp.json()
                     url = self._extract_url(d.get("service", d))
 
+            if service_id:
+                return build_result(
+                    platform_deployment_id=service_id,
+                    url=url,
+                    project_name=project_name,
+                )
             return DeployResult(
-                platform_deployment_id=service_id or "unknown",
+                platform_deployment_id="unknown",
                 url=url,
-                status="deploying" if service_id else "failed",
+                status="failed",
                 project_name=project_name,
             )
 
@@ -141,6 +147,27 @@ class RenderClient(BasePlatformClient):
                     return self._extract_url(service)
         return None
 
+    async def get_project_repo_url(self, project_name: str) -> Optional[str]:
+        """Return the connected GitHub repo URL for a Render service by name.
+
+        Returns the URL string if a repo is connected, "" if the service exists
+        but has no repo, or None on API error.
+        """
+        async with httpx.AsyncClient() as client:
+            resp = await client.get(
+                f"{RENDER_API}/services",
+                headers=self._headers,
+                params={"name": project_name, "type": "static_site", "limit": 100},
+            )
+            if resp.status_code != 200:
+                return None
+            for item in resp.json():
+                service = item.get("service", {})
+                if service.get("name") == project_name:
+                    repo = service.get("repo", "")
+                    return repo if repo else ""
+        return None
+
     async def redeploy(
         self,
         platform_deployment_id: str,
@@ -155,10 +182,9 @@ class RenderClient(BasePlatformClient):
                 json={"clearCache": "do_not_clear"},
             )
             resp.raise_for_status()
-        return DeployResult(
+        return build_result(
             platform_deployment_id=platform_deployment_id,
             url=None,
-            status="deploying",
             project_name=project_name,
         )
 
@@ -233,43 +259,107 @@ class RenderClient(BasePlatformClient):
             )
 
     async def get_deployment_status(self, deployment_id: str) -> str:
-        """Fetch the current status for a Render service."""
+        """Fetch the current build status for a Render service.
+
+        Checks the latest deploy's status rather than service-level suspension so
+        that build failures are surfaced (a suspended service is only checked when
+        no deploys exist yet).
+        """
         async with httpx.AsyncClient() as client:
-            resp = await client.get(
+            deploys_resp = await client.get(
+                f"{RENDER_API}/services/{deployment_id}/deploys",
+                headers=self._headers,
+                params={"limit": 1},
+            )
+            if deploys_resp.status_code == 200:
+                deploys = deploys_resp.json()
+                if isinstance(deploys, list) and deploys:
+                    deploy = deploys[0].get("deploy", deploys[0])
+                    return normalize_status(deploy.get("status", "unknown"))
+
+            # Fallback: service-level check (e.g. suspended with no deploys yet)
+            svc_resp = await client.get(
                 f"{RENDER_API}/services/{deployment_id}",
                 headers=self._headers,
             )
-            if resp.status_code == 404:
+            if svc_resp.status_code == 404:
                 return "not_found"
-            resp.raise_for_status()
-            data = resp.json()
+            svc_resp.raise_for_status()
+            data = svc_resp.json()
             service = data.get("service", data)
-            suspended = service.get("suspended", "not_suspended")
-            return "suspended" if suspended == "suspended" else "ready"
+            return "suspended" if service.get("suspended") == "suspended" else "ready"
+
+    @staticmethod
+    def _extract_log_lines(entries: list) -> list[str]:
+        """Extract message strings from Render log entry list."""
+        result = []
+        for e in entries:
+            log_obj = e.get("log", e)
+            msg = log_obj.get("message", log_obj.get("text", ""))
+            if msg:
+                result.append(msg)
+        return result
 
     async def get_deployment_logs(
         self, platform_deployment_id: str, project_name: str
     ) -> list[str]:
-        """Fetch recent log lines for a Render service."""
+        """Fetch build log lines for a Render static site service.
+
+        Static sites have no runtime process so the generic /logs endpoint
+        returns nothing.  We first try the deploy-specific log endpoint which
+        captures build output, then fall back to the time-scoped generic endpoint.
+        """
         async with httpx.AsyncClient() as client:
+            # Get the latest deploy ID and time window
+            deploys_resp = await client.get(
+                f"{RENDER_API}/services/{platform_deployment_id}/deploys",
+                headers=self._headers,
+                params={"limit": 1},
+            )
+            deploy_id = None
+            start_time = None
+            if deploys_resp.status_code == 200:
+                deploys = deploys_resp.json()
+                if isinstance(deploys, list) and deploys:
+                    deploy = deploys[0].get("deploy", deploys[0])
+                    deploy_id = deploy.get("id")
+                    start_time = deploy.get("createdAt")
+
+            # Primary: deploy-specific log endpoint (build output for static sites)
+            if deploy_id:
+                log_resp = await client.get(
+                    f"{RENDER_API}/services/{platform_deployment_id}/deploys/{deploy_id}/log",
+                    headers=self._headers,
+                )
+                if log_resp.status_code == 200:
+                    try:
+                        entries = log_resp.json()
+                        if isinstance(entries, list):
+                            lines = self._extract_log_lines(entries)
+                            if lines:
+                                return lines
+                    except Exception:
+                        pass
+                    text = log_resp.text.strip()
+                    if text:
+                        return [l for l in text.splitlines() if l.strip()]
+
+            # Fallback: generic logs scoped to deploy start time (no end cutoff)
+            params: dict = {"limit": 100, "direction": "forward"}
+            if start_time:
+                params["startTime"] = start_time
+
             logs_resp = await client.get(
                 f"{RENDER_API}/services/{platform_deployment_id}/logs",
                 headers=self._headers,
-                params={"limit": 100, "direction": "backward"},
+                params=params,
             )
             if logs_resp.status_code != 200:
                 return []
             entries = logs_resp.json()
             if not isinstance(entries, list):
                 return []
-            result = []
-            for e in entries:
-                # Render wraps each entry: {"cursor": "...", "log": {"message": "..."}}
-                log_obj = e.get("log", e)
-                msg = log_obj.get("message", log_obj.get("text", ""))
-                if msg:
-                    result.append(msg)
-            return result
+            return self._extract_log_lines(entries)
 
     async def list_env_vars(
         self, platform_deployment_id: str, project_name: str

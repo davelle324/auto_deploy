@@ -74,6 +74,8 @@ async def create_deployment(data: DeploymentCreate, db: AsyncSession = Depends(g
         db.add(deployment)
         await db.commit()
         raise HTTPException(status_code=502, detail=f"Platform API error: {exc}") from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
     except Exception as exc:
         # Include the platform's response body when available so the caller
         # can see the actual rejection reason (e.g. name conflict, bad token).
@@ -240,6 +242,7 @@ async def sync_deployment(deployment_id: int, db: AsyncSession = Depends(get_db)
     token = await _get_decrypted_token(deployment.platform, db)
     client = _build_client(deployment.platform, token)
 
+    old_status = deployment.status
     try:
         deployment.status = await client.get_deployment_status(
             deployment.platform_deployment_id
@@ -247,13 +250,20 @@ async def sync_deployment(deployment_id: int, db: AsyncSession = Depends(get_db)
         actual_url = await client.get_project_url(deployment.project_name)
         if actual_url:
             deployment.url = actual_url
-        if not deployment.repo_url:
-            fresh_repo = await client.get_project_repo_url(deployment.project_name)
-            if fresh_repo:
-                deployment.repo_url = fresh_repo
+        fresh_repo = await client.get_project_repo_url(deployment.project_name)
+        if fresh_repo:
+            deployment.repo_url = fresh_repo
+        elif fresh_repo == "" and deployment.repo_url:
+            deployment.repo_url = None
     except Exception as exc:
         raise HTTPException(status_code=502, detail=f"Platform API error: {exc}") from exc
 
+    if deployment.status != old_status:
+        db.add(DeploymentEvent(
+            deployment_id=deployment.id,
+            platform_event_id=deployment.platform_deployment_id,
+            status=deployment.status,
+        ))
     await db.commit()
     await db.refresh(deployment)
     return deployment

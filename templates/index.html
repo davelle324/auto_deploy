@@ -171,7 +171,7 @@
   let allDeployments = [];
   let collapsedProjects = new Set(JSON.parse(localStorage.getItem('collapsedProjects') || '[]'));
 
-  const PENDING_STATUSES = new Set(["initializing", "deploying", "building", "queued"]);
+  const PENDING_STATUSES = new Set(["deploying"]);
   const pollingTimers = {};
 
   function startPolling(id) {
@@ -191,13 +191,15 @@
   function formatDate(isoString) {
     if (!isoString) return "";
     const tz = localStorage.getItem('timezone') || 'America/New_York';
+    // SQLite returns naive datetimes without a timezone suffix; treat them as UTC.
+    const ts = /Z|[+-]\d{2}:?\d{2}$/.test(isoString) ? isoString : isoString + 'Z';
     try {
-      return new Date(isoString).toLocaleString(undefined, {
+      return new Date(ts).toLocaleString(undefined, {
         timeZone: tz, month: 'short', day: 'numeric',
         year: 'numeric', hour: 'numeric', minute: '2-digit'
       });
     } catch {
-      return new Date(isoString).toLocaleString();
+      return new Date(ts).toLocaleString();
     }
   }
 
@@ -759,7 +761,7 @@
         if (idx !== -1) allDeployments[idx] = data;
         renderDashboard();
         const newMsg = document.getElementById("msg-" + id);
-        if (newMsg) newMsg.innerHTML = '<span style="color:var(--text-muted)">Synced ' + new Date().toLocaleTimeString() + "</span>";
+        if (newMsg) newMsg.innerHTML = '<span style="color:var(--text-muted)">Synced ' + formatDate(new Date().toISOString()) + "</span>";
         if (PENDING_STATUSES.has((data.status || "").toLowerCase())) startPolling(id);
         else stopPolling(id);
       }
@@ -1098,6 +1100,8 @@
         ? "Must end in <code>.vercel.app</code> (e.g. my-alias.vercel.app)"
         : _domainsPlatform === "render"
         ? "Render does not provide a domain — you must supply your own (e.g. example.com)"
+        : _domainsPlatform === "netlify"
+        ? "Netlify does not provide a domain — you must supply your own (e.g. example.com)"
         : "";
       html += `<div style="display:flex;gap:.5rem;margin-top:1rem;flex-wrap:wrap;">
         <input id="domain-input" type="text" placeholder="example.com"

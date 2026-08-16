@@ -151,6 +151,16 @@ async def test_vercel_get_project_repo_url_returns_none_on_non_200():
 
 
 @pytest.mark.asyncio
+async def test_vercel_get_project_repo_url_returns_empty_string_when_no_repo():
+    # Project exists but has no GitHub repo linked → returns "" so caller can clear
+    proj_resp = _mock_response({"link": None, "latestDeployments": []})
+    mock_client = _make_async_client(get=proj_resp)
+    with patch("integrations.vercel.httpx.AsyncClient", return_value=mock_client):
+        url = await VercelClient("tok").get_project_repo_url("proj")
+    assert url == ""
+
+
+@pytest.mark.asyncio
 async def test_vercel_get_deployment_logs_ndjson():
     ndjson = (
         '{"payload":{"text":"Step 1"}}\n'
@@ -286,10 +296,52 @@ async def test_vercel_remove_domain_non_success_raises():
 # =============================================================================
 
 @pytest.mark.asyncio
+async def test_netlify_get_deployment_logs_uses_logfile_url():
+    # Primary path: deploy has links.logfile → fetch pre-signed S3 URL directly
+    deploys_resp = _mock_response([{"id": "dep_abc", "links": {"logfile": "https://s3.aws/log.txt"}}])
+    logfile_resp = MagicMock()
+    logfile_resp.status_code = 200
+    logfile_resp.text = "Line A\nLine B\n"
+    mock_client = _make_async_client(get=[deploys_resp, logfile_resp])
+    with patch("integrations.netlify.httpx.AsyncClient", return_value=mock_client):
+        lines = await NetlifyClient("tok").get_deployment_logs("site_abc", "proj")
+    assert "Line A" in lines
+    assert "Line B" in lines
+
+
+@pytest.mark.asyncio
+async def test_netlify_get_deployment_logs_logfile_empty_falls_back_to_api():
+    # logfile URL returns empty content → fall back to /deploys/{id}/log
+    deploys_resp = _mock_response([{"id": "dep_abc", "links": {"logfile": "https://s3.aws/log.txt"}}])
+    empty_logfile = MagicMock()
+    empty_logfile.status_code = 200
+    empty_logfile.text = ""
+    api_log_resp = _mock_response([{"t": 1000, "m": "Line A"}])
+    mock_client = _make_async_client(get=[deploys_resp, empty_logfile, api_log_resp])
+    with patch("integrations.netlify.httpx.AsyncClient", return_value=mock_client):
+        lines = await NetlifyClient("tok").get_deployment_logs("site_abc", "proj")
+    assert "Line A" in lines
+
+
+@pytest.mark.asyncio
 async def test_netlify_get_deployment_logs():
+    # No logfile URL → fall back to /log endpoint returning JSON {t, m} entries
+    deploys_resp = _mock_response([{"id": "dep_abc"}])
+    log_resp = _mock_response([{"t": 1000, "m": "Line A"}, {"t": 2000, "m": "Line B"}])
+    mock_client = _make_async_client(get=[deploys_resp, log_resp])
+    with patch("integrations.netlify.httpx.AsyncClient", return_value=mock_client):
+        lines = await NetlifyClient("tok").get_deployment_logs("site_abc", "proj")
+    assert "Line A" in lines
+    assert "Line B" in lines
+
+
+@pytest.mark.asyncio
+async def test_netlify_get_deployment_logs_json_fallback_to_text():
+    # When JSON parse fails, falls back to splitting text lines
     deploys_resp = _mock_response([{"id": "dep_abc"}])
     log_resp = MagicMock()
     log_resp.status_code = 200
+    log_resp.json.side_effect = ValueError("not json")
     log_resp.text = "Line A\nLine B\n"
     mock_client = _make_async_client(get=[deploys_resp, log_resp])
     with patch("integrations.netlify.httpx.AsyncClient", return_value=mock_client):
@@ -318,13 +370,24 @@ async def test_netlify_get_deployment_logs_non_200_returns_empty():
 
 @pytest.mark.asyncio
 async def test_netlify_get_deployment_logs_log_non_200_returns_empty():
+    # No logfile, /log returns non-200, no error_message → empty
     deploys_resp = _mock_response([{"id": "dep_abc"}])
     bad_log = _mock_response({}, status_code=404)
-    bad_log.text = ""
     mock_client = _make_async_client(get=[deploys_resp, bad_log])
     with patch("integrations.netlify.httpx.AsyncClient", return_value=mock_client):
         lines = await NetlifyClient("tok").get_deployment_logs("site_abc", "proj")
     assert lines == []
+
+
+@pytest.mark.asyncio
+async def test_netlify_get_deployment_logs_log_non_200_returns_error_message():
+    # /log returns non-200 but deploy has error_message → surface that message
+    deploys_resp = _mock_response([{"id": "dep_abc", "error_message": "Host key verification failed"}])
+    bad_log = _mock_response({}, status_code=404)
+    mock_client = _make_async_client(get=[deploys_resp, bad_log])
+    with patch("integrations.netlify.httpx.AsyncClient", return_value=mock_client):
+        lines = await NetlifyClient("tok").get_deployment_logs("site_abc", "proj")
+    assert lines == ["Host key verification failed"]
 
 
 @pytest.mark.asyncio
@@ -342,25 +405,60 @@ async def test_netlify_get_project_url_returns_none():
 
 
 @pytest.mark.asyncio
-async def test_netlify_list_env_vars_dict_shape():
-    env_resp = _mock_response({"FOO": "bar", "BAZ": "qux"})
-    mock_client = _make_async_client(get=env_resp)
+async def test_netlify_get_project_repo_url_returns_github_url():
+    list_resp = _mock_response([{"name": "my-site", "repo": {"repo": "owner/repo"}}])
+    mock_client = _make_async_client(get=list_resp)
     with patch("integrations.netlify.httpx.AsyncClient", return_value=mock_client):
-        vars_ = await NetlifyClient("tok").list_env_vars("site_abc", "proj")
-    assert {"key": "FOO", "value": "bar"} in vars_
+        url = await NetlifyClient("tok").get_project_repo_url("my-site")
+    assert url == "https://github.com/owner/repo"
 
 
 @pytest.mark.asyncio
-async def test_netlify_list_env_vars_list_shape():
-    env_resp = _mock_response([
-        {"key": "FOO", "values": [{"value": "bar", "context": "all"}]},
-        {"key": "EMPTY", "values": []},
-    ])
-    mock_client = _make_async_client(get=env_resp)
+async def test_netlify_get_project_repo_url_returns_empty_when_no_repo():
+    list_resp = _mock_response([{"name": "my-site"}])
+    mock_client = _make_async_client(get=list_resp)
+    with patch("integrations.netlify.httpx.AsyncClient", return_value=mock_client):
+        url = await NetlifyClient("tok").get_project_repo_url("my-site")
+    assert url == ""
+
+
+@pytest.mark.asyncio
+async def test_netlify_get_project_repo_url_non_200_returns_none():
+    bad_resp = _mock_response({}, status_code=403)
+    mock_client = _make_async_client(get=bad_resp)
+    with patch("integrations.netlify.httpx.AsyncClient", return_value=mock_client):
+        url = await NetlifyClient("tok").get_project_repo_url("my-site")
+    assert url is None
+
+
+@pytest.mark.asyncio
+async def test_netlify_get_project_repo_url_site_not_found_returns_none():
+    list_resp = _mock_response([{"name": "other-site"}])
+    mock_client = _make_async_client(get=list_resp)
+    with patch("integrations.netlify.httpx.AsyncClient", return_value=mock_client):
+        url = await NetlifyClient("tok").get_project_repo_url("my-site")
+    assert url is None
+
+
+@pytest.mark.asyncio
+async def test_netlify_list_env_vars():
+    # Reads from build_settings.env on the site object
+    site_resp = _mock_response({"build_settings": {"env": {"FOO": "bar", "BAZ": "qux"}}})
+    mock_client = _make_async_client(get=site_resp)
     with patch("integrations.netlify.httpx.AsyncClient", return_value=mock_client):
         vars_ = await NetlifyClient("tok").list_env_vars("site_abc", "proj")
     assert {"key": "FOO", "value": "bar"} in vars_
-    assert {"key": "EMPTY", "value": ""} in vars_
+    assert {"key": "BAZ", "value": "qux"} in vars_
+
+
+@pytest.mark.asyncio
+async def test_netlify_list_env_vars_no_env_returns_empty():
+    # Site exists but build_settings.env is absent
+    site_resp = _mock_response({"build_settings": {}})
+    mock_client = _make_async_client(get=site_resp)
+    with patch("integrations.netlify.httpx.AsyncClient", return_value=mock_client):
+        vars_ = await NetlifyClient("tok").list_env_vars("site_abc", "proj")
+    assert vars_ == []
 
 
 @pytest.mark.asyncio
@@ -373,28 +471,25 @@ async def test_netlify_list_env_vars_non_200_returns_empty():
 
 
 @pytest.mark.asyncio
-async def test_netlify_list_env_vars_unexpected_shape_returns_empty():
-    env_resp = _mock_response("unexpected_string")
-    mock_client = _make_async_client(get=env_resp)
-    with patch("integrations.netlify.httpx.AsyncClient", return_value=mock_client):
-        vars_ = await NetlifyClient("tok").list_env_vars("site_abc", "proj")
-    assert vars_ == []
-
-
-@pytest.mark.asyncio
 async def test_netlify_set_env_vars():
-    ok_resp = _mock_response({}, status_code=204)
-    mock_client = _make_async_client(patch=ok_resp)
+    # GET site to read existing env, then PATCH site with merged env
+    site_resp = _mock_response({"build_settings": {"env": {"EXISTING": "val"}}})
+    ok_resp = _mock_response({}, status_code=200)
+    mock_client = _make_async_client(get=site_resp, patch=ok_resp)
     with patch("integrations.netlify.httpx.AsyncClient", return_value=mock_client):
         await NetlifyClient("tok").set_env_vars("site_abc", "proj", [{"key": "A", "value": "1"}])
-    mock_client.patch.assert_called_once()
+    patch_call = mock_client.patch.call_args
+    sent_env = patch_call[1]["json"]["build_settings"]["env"]
+    assert sent_env["A"] == "1"
+    assert sent_env["EXISTING"] == "val"
 
 
 @pytest.mark.asyncio
 async def test_netlify_set_env_vars_raises_on_error():
+    site_resp = _mock_response({"build_settings": {"env": {}}})
     bad_resp = _mock_response({}, status_code=500)
     bad_resp.raise_for_status.side_effect = Exception("fail")
-    mock_client = _make_async_client(patch=bad_resp)
+    mock_client = _make_async_client(get=site_resp, patch=bad_resp)
     with patch("integrations.netlify.httpx.AsyncClient", return_value=mock_client):
         with pytest.raises(Exception):
             await NetlifyClient("tok").set_env_vars("site_abc", "proj", [{"key": "A", "value": "1"}])
@@ -402,18 +497,24 @@ async def test_netlify_set_env_vars_raises_on_error():
 
 @pytest.mark.asyncio
 async def test_netlify_delete_env_var():
-    ok_resp = _mock_response({}, status_code=204)
-    mock_client = _make_async_client(delete=ok_resp)
+    # GET site, remove the key, PATCH with remaining env
+    site_resp = _mock_response({"build_settings": {"env": {"FOO": "bar", "KEEP": "yes"}}})
+    ok_resp = _mock_response({}, status_code=200)
+    mock_client = _make_async_client(get=site_resp, patch=ok_resp)
     with patch("integrations.netlify.httpx.AsyncClient", return_value=mock_client):
         await NetlifyClient("tok").delete_env_var("site_abc", "proj", "FOO")
-    mock_client.delete.assert_called_once()
+    patch_call = mock_client.patch.call_args
+    sent_env = patch_call[1]["json"]["build_settings"]["env"]
+    assert "FOO" not in sent_env
+    assert sent_env["KEEP"] == "yes"
 
 
 @pytest.mark.asyncio
 async def test_netlify_delete_env_var_raises_on_error():
+    site_resp = _mock_response({"build_settings": {"env": {"FOO": "bar"}}})
     bad_resp = _mock_response({}, status_code=500)
     bad_resp.raise_for_status.side_effect = Exception("fail")
-    mock_client = _make_async_client(delete=bad_resp)
+    mock_client = _make_async_client(get=site_resp, patch=bad_resp)
     with patch("integrations.netlify.httpx.AsyncClient", return_value=mock_client):
         with pytest.raises(Exception):
             await NetlifyClient("tok").delete_env_var("site_abc", "proj", "FOO")
@@ -506,12 +607,71 @@ async def test_render_get_project_url_name_not_in_results():
 
 
 @pytest.mark.asyncio
+async def test_render_get_project_repo_url_returns_repo():
+    list_resp = _mock_response([{"service": {"name": "proj", "repo": "https://github.com/owner/repo"}}])
+    mock_client = _make_async_client(get=list_resp)
+    with patch("integrations.render.httpx.AsyncClient", return_value=mock_client):
+        url = await RenderClient("tok").get_project_repo_url("proj")
+    assert url == "https://github.com/owner/repo"
+
+
+@pytest.mark.asyncio
+async def test_render_get_project_repo_url_returns_empty_when_no_repo():
+    list_resp = _mock_response([{"service": {"name": "proj"}}])
+    mock_client = _make_async_client(get=list_resp)
+    with patch("integrations.render.httpx.AsyncClient", return_value=mock_client):
+        url = await RenderClient("tok").get_project_repo_url("proj")
+    assert url == ""
+
+
+@pytest.mark.asyncio
+async def test_render_get_project_repo_url_non_200_returns_none():
+    bad_resp = _mock_response({}, status_code=403)
+    mock_client = _make_async_client(get=bad_resp)
+    with patch("integrations.render.httpx.AsyncClient", return_value=mock_client):
+        url = await RenderClient("tok").get_project_repo_url("proj")
+    assert url is None
+
+
+@pytest.mark.asyncio
+async def test_render_get_project_repo_url_not_found_returns_none():
+    list_resp = _mock_response([{"service": {"name": "other"}}])
+    mock_client = _make_async_client(get=list_resp)
+    with patch("integrations.render.httpx.AsyncClient", return_value=mock_client):
+        url = await RenderClient("tok").get_project_repo_url("proj")
+    assert url is None
+
+
+@pytest.mark.asyncio
+async def test_render_get_deployment_status_uses_latest_deploy():
+    # Primary: reads from latest deploy's status field
+    deploys_resp = _mock_response([{"deploy": {"id": "d1", "status": "build_in_progress"}}])
+    mock_client = _make_async_client(get=deploys_resp)
+    with patch("integrations.render.httpx.AsyncClient", return_value=mock_client):
+        status = await RenderClient("tok").get_deployment_status("srv_abc")
+    assert status == "deploying"
+
+
+@pytest.mark.asyncio
+async def test_render_get_deployment_status_fallback_to_service_check():
+    # No deploys yet → falls back to service-level status
+    deploys_resp = _mock_response([])
+    svc_resp = _mock_response({"service": {"suspended": "not_suspended"}})
+    mock_client = _make_async_client(get=[deploys_resp, svc_resp])
+    with patch("integrations.render.httpx.AsyncClient", return_value=mock_client):
+        status = await RenderClient("tok").get_deployment_status("srv_abc")
+    assert status == "ready"
+
+
+@pytest.mark.asyncio
 async def test_render_get_deployment_logs_wrapped_message():
+    deploys_resp = _mock_response([{"deploy": {"id": "dep_abc", "createdAt": "2024-01-01T00:00:00Z"}}])
+    not_found_resp = _mock_response({}, status_code=404)
     logs_resp = _mock_response([
         {"cursor": "c1", "log": {"message": "Build started", "level": "info"}},
         {"cursor": "c2", "log": {"message": "Done", "level": "info"}},
     ])
-    mock_client = _make_async_client(get=logs_resp)
+    mock_client = _make_async_client(get=[deploys_resp, not_found_resp, logs_resp])
     with patch("integrations.render.httpx.AsyncClient", return_value=mock_client):
         lines = await RenderClient("tok").get_deployment_logs("srv_abc", "proj")
     assert "Build started" in lines
@@ -519,10 +679,49 @@ async def test_render_get_deployment_logs_wrapped_message():
 
 
 @pytest.mark.asyncio
+async def test_render_get_deployment_logs_uses_deploy_timestamps():
+    # startTime from the deploy is passed to the generic logs fallback
+    deploys_resp = _mock_response([{"deploy": {"id": "dep_abc", "createdAt": "2024-01-01T00:00:00Z"}}])
+    not_found_resp = _mock_response({}, status_code=404)
+    logs_resp = _mock_response([{"log": {"message": "Build done"}}])
+    mock_client = _make_async_client(get=[deploys_resp, not_found_resp, logs_resp])
+    with patch("integrations.render.httpx.AsyncClient", return_value=mock_client):
+        lines = await RenderClient("tok").get_deployment_logs("srv_abc", "proj")
+    assert "Build done" in lines
+    params = mock_client.get.call_args_list[2][1]["params"]
+    assert params["startTime"] == "2024-01-01T00:00:00Z"
+    assert "endTime" not in params
+
+
+@pytest.mark.asyncio
+async def test_render_get_deployment_logs_deploy_log_returns_json_lines():
+    # Primary path: deploy-specific log endpoint returns a JSON list → used directly
+    deploys_resp = _mock_response([{"deploy": {"id": "dep_abc", "createdAt": "2024-01-01T00:00:00Z"}}])
+    deploy_log_resp = _mock_response([{"log": {"message": "Build line from deploy endpoint"}}])
+    mock_client = _make_async_client(get=[deploys_resp, deploy_log_resp])
+    with patch("integrations.render.httpx.AsyncClient", return_value=mock_client):
+        lines = await RenderClient("tok").get_deployment_logs("srv_abc", "proj")
+    assert lines == ["Build line from deploy endpoint"]
+    assert mock_client.get.call_count == 2
+
+
+@pytest.mark.asyncio
+async def test_render_get_deployment_logs_deploys_non_200_proceeds_without_timestamps():
+    # Deploys fetch fails → still attempt logs with no time filter
+    deploys_bad = _mock_response({}, status_code=404)
+    logs_resp = _mock_response([{"log": {"message": "Some log"}}])
+    mock_client = _make_async_client(get=[deploys_bad, logs_resp])
+    with patch("integrations.render.httpx.AsyncClient", return_value=mock_client):
+        lines = await RenderClient("tok").get_deployment_logs("srv_abc", "proj")
+    assert "Some log" in lines
+
+
+@pytest.mark.asyncio
 async def test_render_get_deployment_logs_wrapped_text_key():
-    # Fallback to "text" when "message" is absent
+    deploys_resp = _mock_response([{"deploy": {"id": "dep_abc", "createdAt": "2024-01-01T00:00:00Z"}}])
+    not_found_resp = _mock_response({}, status_code=404)
     logs_resp = _mock_response([{"cursor": "c1", "log": {"text": "Output line"}}])
-    mock_client = _make_async_client(get=logs_resp)
+    mock_client = _make_async_client(get=[deploys_resp, not_found_resp, logs_resp])
     with patch("integrations.render.httpx.AsyncClient", return_value=mock_client):
         lines = await RenderClient("tok").get_deployment_logs("srv_abc", "proj")
     assert "Output line" in lines
@@ -530,8 +729,9 @@ async def test_render_get_deployment_logs_wrapped_text_key():
 
 @pytest.mark.asyncio
 async def test_render_get_deployment_logs_empty_list():
-    empty_resp = _mock_response([])
-    mock_client = _make_async_client(get=empty_resp)
+    deploys_resp = _mock_response([])
+    logs_resp = _mock_response([])
+    mock_client = _make_async_client(get=[deploys_resp, logs_resp])
     with patch("integrations.render.httpx.AsyncClient", return_value=mock_client):
         lines = await RenderClient("tok").get_deployment_logs("srv_abc", "proj")
     assert lines == []
@@ -548,12 +748,13 @@ async def test_render_get_deployment_logs_non_200():
 
 @pytest.mark.asyncio
 async def test_render_get_deployment_logs_entry_no_message():
-    # Items with empty message are excluded
+    deploys_resp = _mock_response([{"deploy": {"id": "dep_abc"}}])
+    not_found_resp = _mock_response({}, status_code=404)
     logs_resp = _mock_response([
         {"cursor": "c1", "log": {"message": ""}},
         {"cursor": "c2", "log": {"message": "Real line"}},
     ])
-    mock_client = _make_async_client(get=logs_resp)
+    mock_client = _make_async_client(get=[deploys_resp, not_found_resp, logs_resp])
     with patch("integrations.render.httpx.AsyncClient", return_value=mock_client):
         lines = await RenderClient("tok").get_deployment_logs("srv_abc", "proj")
     assert lines == ["Real line"]
@@ -561,12 +762,40 @@ async def test_render_get_deployment_logs_entry_no_message():
 
 @pytest.mark.asyncio
 async def test_render_get_deployment_logs_flat_fallback():
-    # If items aren't wrapped, fall back to reading message/text directly
+    deploys_resp = _mock_response([{"deploy": {"id": "dep_abc"}}])
+    not_found_resp = _mock_response({}, status_code=404)
     logs_resp = _mock_response([{"message": "Flat line"}])
-    mock_client = _make_async_client(get=logs_resp)
+    mock_client = _make_async_client(get=[deploys_resp, not_found_resp, logs_resp])
     with patch("integrations.render.httpx.AsyncClient", return_value=mock_client):
         lines = await RenderClient("tok").get_deployment_logs("srv_abc", "proj")
     assert "Flat line" in lines
+
+
+@pytest.mark.asyncio
+async def test_render_get_deployment_logs_deploy_log_plain_text():
+    # Primary path: deploy-specific log returns plain text (not JSON)
+    deploys_resp = _mock_response([{"deploy": {"id": "dep_abc"}}])
+    plain_text_resp = MagicMock()
+    plain_text_resp.status_code = 200
+    plain_text_resp.json.side_effect = ValueError("not json")
+    plain_text_resp.text = "line one\nline two\n"
+    mock_client = _make_async_client(get=[deploys_resp, plain_text_resp])
+    with patch("integrations.render.httpx.AsyncClient", return_value=mock_client):
+        lines = await RenderClient("tok").get_deployment_logs("srv_abc", "proj")
+    assert lines == ["line one", "line two"]
+
+
+@pytest.mark.asyncio
+async def test_render_get_deployment_logs_deploy_log_empty_falls_to_generic():
+    # Deploy log returns 200 with empty JSON list and empty text → fallback to generic
+    deploys_resp = _mock_response([{"deploy": {"id": "dep_abc", "createdAt": "2024-01-01T00:00:00Z"}}])
+    empty_log_resp = _mock_response([])
+    empty_log_resp.text = ""
+    logs_resp = _mock_response([{"log": {"message": "From generic"}}])
+    mock_client = _make_async_client(get=[deploys_resp, empty_log_resp, logs_resp])
+    with patch("integrations.render.httpx.AsyncClient", return_value=mock_client):
+        lines = await RenderClient("tok").get_deployment_logs("srv_abc", "proj")
+    assert lines == ["From generic"]
 
 
 @pytest.mark.asyncio
@@ -910,6 +1139,70 @@ async def test_sync_unknown_id_returns_early(client):
 
 
 @pytest.mark.asyncio
+async def test_sync_adds_history_event_on_status_change(client):
+    # Create with "deploying", sync to "ready" → event written for the transition
+    await client.post("/api/tokens/", json={"platform": "vercel", "token": "tok"})
+    with patch("routers.deployments.VercelClient") as MC:
+        MC.return_value.create_deployment = AsyncMock(return_value=DeployResult(
+            platform_deployment_id="dpl_xyz", url="https://x.vercel.app",
+            status="deploying", project_name="pp",
+        ))
+        create = await client.post("/api/deployments/", json={"platform": "vercel", "project_name": "pp"})
+    dep_id = create.json()["id"]
+
+    with patch("routers.deployments.VercelClient") as MC:
+        MC.return_value.get_deployment_status = AsyncMock(return_value="ready")
+        MC.return_value.get_project_url = AsyncMock(return_value=None)
+        MC.return_value.get_project_repo_url = AsyncMock(return_value=None)
+        await client.post(f"/api/deployments/{dep_id}/sync")
+
+    history = await client.get(f"/api/deployments/{dep_id}/history")
+    assert any(e["status"] == "ready" for e in history.json())
+
+
+@pytest.mark.asyncio
+async def test_sync_no_event_when_status_unchanged(client):
+    # Create with "ready", sync to same "ready" → no new history event added
+    dep_id = await _seed(client)
+    initial_count = len((await client.get(f"/api/deployments/{dep_id}/history")).json())
+
+    with patch("routers.deployments.VercelClient") as MC:
+        MC.return_value.get_deployment_status = AsyncMock(return_value="ready")
+        MC.return_value.get_project_url = AsyncMock(return_value=None)
+        MC.return_value.get_project_repo_url = AsyncMock(return_value=None)
+        await client.post(f"/api/deployments/{dep_id}/sync")
+
+    after_count = len((await client.get(f"/api/deployments/{dep_id}/history")).json())
+    assert after_count == initial_count
+
+
+@pytest.mark.asyncio
+async def test_sync_clears_repo_url_when_platform_returns_empty(client):
+    # Deployment has a repo URL; platform returns "" (explicitly no repo) → cleared
+    await client.post("/api/tokens/", json={"platform": "vercel", "token": "tok"})
+    with patch("routers.deployments.VercelClient") as MC:
+        MC.return_value.create_deployment = AsyncMock(return_value=DeployResult(
+            platform_deployment_id="dpl_abc", url="https://x.vercel.app",
+            status="ready", project_name="p",
+        ))
+        r = await client.post("/api/deployments/", json={
+            "platform": "vercel", "project_name": "p",
+            "repo_url": "https://github.com/owner/repo",
+        })
+    dep_id = r.json()["id"]
+    assert r.json()["repo_url"] == "https://github.com/owner/repo"
+
+    with patch("routers.deployments.VercelClient") as MC:
+        MC.return_value.get_deployment_status = AsyncMock(return_value="ready")
+        MC.return_value.get_project_url = AsyncMock(return_value=None)
+        MC.return_value.get_project_repo_url = AsyncMock(return_value="")
+        await client.post(f"/api/deployments/{dep_id}/sync")
+
+    after = (await client.get(f"/api/deployments/{dep_id}")).json()
+    assert after["repo_url"] is None
+
+
+@pytest.mark.asyncio
 async def test_get_logs_platform_error_raises_502(client):
     dep_id = await _seed(client)
     with patch("routers.deployments.VercelClient") as MC:
@@ -1199,6 +1492,38 @@ async def test_domains_remove_not_found_404(client):
 
 
 @pytest.mark.asyncio
+async def test_netlify_create_deployment_422_subdomain_taken():
+    resp_422 = _mock_response({"errors": {"subdomain": ["must be unique"]}}, status_code=422)
+    mock_client = _make_async_client(post=[resp_422])
+    with patch("integrations.netlify.httpx.AsyncClient", return_value=mock_client):
+        with pytest.raises(ValueError, match="already taken"):
+            await NetlifyClient("tok").create_deployment("my-site")
+
+
+@pytest.mark.asyncio
+async def test_netlify_create_deployment_422_other_error():
+    resp_422 = _mock_response({"errors": {"name": ["invalid"]}}, status_code=422)
+    resp_422.text = '{"errors":{"name":["invalid"]}}'
+    mock_client = _make_async_client(post=[resp_422])
+    with patch("integrations.netlify.httpx.AsyncClient", return_value=mock_client):
+        with pytest.raises(ValueError, match="rejected"):
+            await NetlifyClient("tok").create_deployment("my-site")
+
+
+@pytest.mark.asyncio
+async def test_create_deployment_value_error_returns_400(client):
+    await client.post("/api/tokens/", json={"platform": "netlify", "token": "tok"})
+    with patch("routers.deployments.NetlifyClient") as MC:
+        MC.return_value.create_deployment = AsyncMock(side_effect=ValueError("already taken"))
+        resp = await client.post(
+            "/api/deployments/",
+            json={"platform": "netlify", "project_name": "my-site"},
+        )
+    assert resp.status_code == 400
+    assert "already taken" in resp.json()["detail"]
+
+
+@pytest.mark.asyncio
 async def test_delete_re_raises_http_exception(client):
     dep_id = await _seed(client)
     from fastapi import HTTPException as FastHTTPException
@@ -1237,8 +1562,9 @@ async def test_render_list_deployments_skips_no_id():
 
 @pytest.mark.asyncio
 async def test_render_get_deployment_logs_non_list_response():
-    non_list_logs = _mock_response({"error": "not a list"})
-    mock_client = _make_async_client(get=non_list_logs)
+    # Deploys returns dict (non-list) → no timestamps; logs returns dict → empty
+    non_list = _mock_response({"error": "not a list"})
+    mock_client = _make_async_client(get=non_list)
     with patch("integrations.render.httpx.AsyncClient", return_value=mock_client):
         lines = await RenderClient("tok").get_deployment_logs("srv_abc", "proj")
     assert lines == []

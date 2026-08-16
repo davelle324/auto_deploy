@@ -28,6 +28,20 @@
     return String(str ?? "").replace(/[&<>"']/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
   }
 
+  function formatDate(isoString) {
+    if (!isoString) return "";
+    const tz = localStorage.getItem('timezone') || 'America/New_York';
+    const ts = /Z|[+-]\d{2}:?\d{2}$/.test(isoString) ? isoString : isoString + 'Z';
+    try {
+      return new Date(ts).toLocaleString(undefined, {
+        timeZone: tz, month: 'short', day: 'numeric',
+        year: 'numeric', hour: 'numeric', minute: '2-digit'
+      });
+    } catch {
+      return new Date(ts).toLocaleString();
+    }
+  }
+
   async function loadTokens() {
     const grid = document.getElementById("token-grid");
     try {
@@ -41,7 +55,7 @@
               ${t.configured ? "configured" : "not set"}
             </span>
           </div>
-          ${t.configured && t.created_at ? `<div class="card-meta" style="margin-bottom:.5rem;">Set ${new Date(t.created_at).toLocaleDateString()}</div>` : ""}
+          ${t.configured && t.created_at ? `<div class="card-meta" style="margin-bottom:.5rem;">Set ${formatDate(t.created_at)}</div>` : ""}
           <div id="msg-${t.platform}"></div>
           <div class="token-form">
             <input type="password" id="input-${t.platform}"

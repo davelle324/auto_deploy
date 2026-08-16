@@ -6,7 +6,7 @@ from typing import Optional
 
 import httpx
 
-from integrations.base import BasePlatformClient, DeployResult, PartialDeployError, safe_delete
+from integrations.base import BasePlatformClient, DeployResult, PartialDeployError, build_result, normalize_status, safe_delete
 
 VERCEL_API = "https://api.vercel.com"
 
@@ -264,10 +264,9 @@ class VercelClient(BasePlatformClient):
             if not url:
                 url = await self._fetch_project_url(client, project_name)
 
-            return DeployResult(
+            return build_result(
                 platform_deployment_id=data.get("id", project_name),
                 url=url,
-                status=data.get("readyState", "INITIALIZING").lower(),
                 project_name=project_name,
             )
 
@@ -302,10 +301,9 @@ class VercelClient(BasePlatformClient):
             deploy_resp.raise_for_status()
             data = deploy_resp.json()
 
-            return DeployResult(
+            return build_result(
                 platform_deployment_id=data.get("id", project_name),
                 url=await self._fetch_project_url(client, project_name),
-                status=data.get("readyState", "INITIALIZING").lower(),
                 project_name=project_name,
             )
 
@@ -342,10 +340,9 @@ class VercelClient(BasePlatformClient):
                 self._check_github_error(deploy_resp.json())
             deploy_resp.raise_for_status()
             data = deploy_resp.json()
-            return DeployResult(
+            return build_result(
                 platform_deployment_id=data.get("id", platform_deployment_id),
                 url=await self._fetch_project_url(client, project_name),
-                status=data.get("readyState", "INITIALIZING").lower(),
                 project_name=project_name,
             )
 
@@ -374,7 +371,7 @@ class VercelClient(BasePlatformClient):
                 DeployResult(
                     platform_deployment_id=latest.get("id") or proj["id"],
                     url=url,
-                    status=latest.get("readyState", "unknown").lower(),
+                    status=normalize_status(latest.get("readyState", "unknown")),
                     project_name=proj["name"],
                     repo_url=repo_url,
                 )
@@ -387,14 +384,19 @@ class VercelClient(BasePlatformClient):
             return await self._fetch_project_url(client, project_name)
 
     async def get_project_repo_url(self, project_name: str) -> Optional[str]:
-        """Fetch the connected GitHub repo URL for an existing Vercel project."""
+        """Fetch the connected GitHub repo URL for an existing Vercel project.
+
+        Returns the URL string if a repo is connected, "" if the project exists
+        but has no repo (so the caller can clear a stale cached URL), or None on
+        API error (caller should not change the stored value).
+        """
         async with httpx.AsyncClient() as client:
             resp = await client.get(
                 f"{VERCEL_API}/v9/projects/{project_name}",
                 headers=self._headers,
             )
             if resp.status_code == 200:
-                return self._extract_repo_url(resp.json())
+                return self._extract_repo_url(resp.json()) or ""
         return None
 
     async def delete_deployment(
@@ -414,7 +416,7 @@ class VercelClient(BasePlatformClient):
             if resp.status_code == 404:
                 return "not_found"
             resp.raise_for_status()
-            return resp.json().get("readyState", "unknown").lower()
+            return normalize_status(resp.json().get("readyState", "unknown"))
 
     async def get_deployment_logs(
         self, platform_deployment_id: str, project_name: str

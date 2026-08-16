@@ -87,7 +87,7 @@ async def test_vercel_create_deployment_no_repo():
 
     assert result.platform_deployment_id == "dpl_xyz"
     assert result.url == "https://my-site.vercel.app"
-    assert result.status == "initializing"
+    assert result.status == "deploying"
     mock_client.put.assert_called_once()
 
 
@@ -127,7 +127,7 @@ async def test_vercel_create_deployment_no_repo_file_already_uploaded():
     with patch("integrations.vercel.httpx.AsyncClient", return_value=mock_client):
         result = await VercelClient("fake-token").create_deployment("my-site")
 
-    assert result.status == "ready"
+    assert result.status == "deploying"
 
 
 @pytest.mark.asyncio
@@ -149,7 +149,7 @@ async def test_vercel_create_deployment_with_repo():
             "my-site", repo_url="https://github.com/octocat/hello"
         )
 
-    assert result.status == "ready"
+    assert result.status == "deploying"
     # Project creation POST must include gitRepository to enable auto-deploy on push
     project_body = mock_client.post.call_args_list[0].kwargs["json"]
     assert project_body["gitRepository"]["repo"] == "octocat/hello"
@@ -598,7 +598,7 @@ async def test_vercel_redeploy():
         )
 
     assert result.platform_deployment_id == "dpl_new"
-    assert result.status == "initializing"
+    assert result.status == "deploying"
     deploy_body = mock_client.post.call_args.kwargs["json"]
     assert deploy_body["gitSource"]["org"] == "owner"
     assert deploy_body["gitSource"]["repo"] == "repo"
@@ -631,7 +631,7 @@ async def test_vercel_connect_repo():
 
     assert result.platform_deployment_id == "dpl_new123"
     assert result.url == "https://my-site.vercel.app"
-    assert result.status == "initializing"
+    assert result.status == "deploying"
     # PATCH must be called to link the repo for auto-deploys
     mock_client.patch.assert_called_once()
     patch_body = mock_client.patch.call_args.kwargs["json"]
@@ -669,7 +669,7 @@ async def test_netlify_create_deployment():
 
     assert result.platform_deployment_id == "site_netlify123"
     assert result.url == "https://my-site.netlify.app"
-    assert result.status == "current"
+    assert result.status == "ready"
 
 
 @pytest.mark.asyncio
@@ -685,18 +685,43 @@ async def test_netlify_create_deployment_with_repo():
     body = mock_client.post.call_args.kwargs["json"]
     assert "repo" in body
     assert body["repo"]["repo"] == "owner/repo"
-    assert result.status == "building"
+    assert result.status == "deploying"
 
 
 @pytest.mark.asyncio
 async def test_netlify_get_deployment_status():
-    status_resp = _mock_response({"state": "current"})
-    mock_client = _make_async_client(get_return=status_resp)
+    # Returns the latest deploy's state (not site-level state)
+    deploys_resp = _mock_response([{"state": "current"}])
+    mock_client = _make_async_client(get_return=deploys_resp)
 
     with patch("integrations.netlify.httpx.AsyncClient", return_value=mock_client):
         status = await NetlifyClient("fake-token").get_deployment_status("site_abc")
 
-    assert status == "current"
+    assert status == "ready"
+
+
+@pytest.mark.asyncio
+async def test_netlify_get_deployment_status_error_deploy():
+    # A failed build returns "error" normalized to "failed"
+    deploys_resp = _mock_response([{"state": "error"}])
+    mock_client = _make_async_client(get_return=deploys_resp)
+
+    with patch("integrations.netlify.httpx.AsyncClient", return_value=mock_client):
+        status = await NetlifyClient("fake-token").get_deployment_status("site_abc")
+
+    assert status == "failed"
+
+
+@pytest.mark.asyncio
+async def test_netlify_get_deployment_status_no_deploys():
+    # Site exists but has never been deployed
+    deploys_resp = _mock_response([])
+    mock_client = _make_async_client(get_return=deploys_resp)
+
+    with patch("integrations.netlify.httpx.AsyncClient", return_value=mock_client):
+        status = await NetlifyClient("fake-token").get_deployment_status("site_abc")
+
+    assert status == "ready"
 
 
 @pytest.mark.asyncio
@@ -722,7 +747,7 @@ async def test_netlify_list_deployments():
 
     assert len(results) == 1
     assert results[0].project_name == "my-site"
-    assert results[0].status == "current"
+    assert results[0].status == "ready"
 
 
 @pytest.mark.asyncio
@@ -742,7 +767,7 @@ async def test_netlify_connect_repo():
 
     assert result.platform_deployment_id == "site_abc"
     assert result.url == "https://my-site.netlify.app"
-    assert result.status == "building"
+    assert result.status == "deploying"
     body = mock_client.put.call_args.kwargs["json"]
     assert body["repo"]["repo"] == "owner/repo"
 
@@ -767,7 +792,7 @@ async def test_netlify_redeploy():
     with patch("integrations.netlify.httpx.AsyncClient", return_value=mock_client):
         result = await NetlifyClient("fake-token").redeploy("site_abc", "my-site")
 
-    assert result.status == "building"
+    assert result.status == "deploying"
     assert result.platform_deployment_id == "site_abc"
     assert "site_abc" in mock_client.post.call_args.args[0]
 

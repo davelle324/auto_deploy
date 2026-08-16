@@ -306,12 +306,15 @@ h2 { font-size: 18px; font-weight: 600; letter-spacing: -.2px; margin-bottom: .9
   text-transform: lowercase;
   letter-spacing: .02em;
 }
-.badge-ready, .badge-deployed          { background: var(--success-bg); color: var(--success); }
+.badge-ready, .badge-deployed,
+.badge-current, .badge-live            { background: var(--success-bg); color: var(--success); }
 .badge-deploying, .badge-building,
 .badge-initializing, .badge-queued     { background: var(--warning-bg); color: var(--warning); }
 .badge-failed, .badge-error,
 .badge-deployment_failed               { background: var(--danger-bg);  color: var(--danger);  }
-.badge-pending, .badge-unknown         { background: var(--surface-raised); color: var(--text-muted); border: 1px solid var(--border); }
+.badge-suspended                       { background: var(--warning-bg); color: var(--warning); opacity: .7; }
+.badge-pending, .badge-unknown,
+.badge-not_found                       { background: var(--surface-raised); color: var(--text-muted); border: 1px solid var(--border); }
 .badge-requires_repo                   { background: #ede9fe; color: #5b21b6; }
 [data-theme="dark"] .badge-requires_repo { background: #1e1240; color: #c4b5fd; }
 

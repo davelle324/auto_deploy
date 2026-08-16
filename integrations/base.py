@@ -6,6 +6,57 @@ from typing import Optional
 
 import httpx
 
+# Maps every platform-specific status string to a common set:
+#   deploying · ready · failed · suspended · unknown · not_found
+_STATUS_MAP: dict[str, str] = {
+    # Vercel readyState
+    "initializing": "deploying",
+    "building": "deploying",
+    "queued": "deploying",
+    "canceled": "failed",
+    "error": "failed",
+    # Netlify deploy state
+    "new": "deploying",
+    "enqueued": "deploying",
+    "current": "ready",
+    # Render deploy status
+    "created": "deploying",
+    "build_in_progress": "deploying",
+    "update_in_progress": "deploying",
+    "pre_deploy_in_progress": "deploying",
+    "live": "ready",
+    "build_failed": "failed",
+    "update_failed": "failed",
+    "pre_deploy_failed": "failed",
+    "deactivated": "suspended",
+}
+
+
+def normalize_status(raw: str) -> str:
+    """Return a platform-agnostic status string for any platform-specific value."""
+    lowered = raw.lower()
+    return _STATUS_MAP.get(lowered, lowered)
+
+
+def build_result(
+    platform_deployment_id: str,
+    url: Optional[str],
+    project_name: str,
+    repo_url: Optional[str] = None,
+) -> "DeployResult":
+    """Return a DeployResult for any operation that triggers a build.
+
+    Always sets status to 'deploying' so the dashboard starts polling
+    regardless of what the platform API reports at creation time.
+    """
+    return DeployResult(
+        platform_deployment_id=platform_deployment_id,
+        url=url,
+        status="deploying",
+        project_name=project_name,
+        repo_url=repo_url,
+    )
+
 
 @dataclass
 class DeployResult:
