@@ -2,10 +2,17 @@
 {% block title %}Dashboard — Auto Deploy{% endblock %}
 
 {% block content %}
-<h1>Deployments</h1>
-<div class="actions" style="display:flex;gap:.75rem;align-items:center;flex-wrap:wrap;">
+<div class="page-header">
+  <div class="page-header-text">
+    <h1>Deployments</h1>
+    <p class="page-subtitle">Manage your projects across Vercel, Netlify, and Render</p>
+  </div>
+  <div id="stats-bar"></div>
+</div>
+
+<div class="action-bar">
   <a href="/deploy" class="btn btn-primary">+ New Deployment</a>
-  <button class="btn btn-secondary" onclick="loadAll()">Refresh</button>
+  <button class="btn btn-secondary" onclick="loadAll()">↻ Refresh</button>
 </div>
 
 <!-- Project management -->
@@ -14,7 +21,8 @@
   <div id="new-project-form" style="display:none;gap:.5rem;align-items:center;flex-wrap:wrap;">
     <input id="new-project-name" type="text" placeholder="Project name"
            style="padding:.35rem .6rem;font-size:13px;border:1px solid var(--border);
-                  border-radius:4px;background:var(--bg-secondary,#f5f5f7);color:var(--text);">
+                  border-radius:4px;background:var(--surface);color:var(--text);
+                  width:auto;min-width:180px;">
     <button class="btn btn-primary" style="font-size:13px;" onclick="createProject()">Create</button>
     <button class="btn btn-secondary" style="font-size:13px;" onclick="toggleNewProjectForm()">Cancel</button>
   </div>
@@ -29,7 +37,7 @@
       <span id="platform-label">All Platforms</span><span style="font-size:10px;">▾</span>
     </button>
     <div id="platform-filter-options" style="display:none;position:absolute;top:calc(100% + 4px);left:0;z-index:200;
-         background:var(--card-bg,#fff);border:1px solid var(--border);border-radius:6px;
+         background:var(--surface);border:1px solid var(--border);border-radius:6px;
          padding:.4rem .6rem;min-width:150px;box-shadow:0 2px 8px rgba(0,0,0,.12);">
       <label style="display:flex;align-items:center;gap:.4rem;padding:.25rem 0;font-size:13px;cursor:pointer;">
         <input type="checkbox" id="platform-cb-all" onchange="platformCbAll(this)" checked> All
@@ -47,7 +55,7 @@
   </div>
 
   <select id="project-filter-select" style="font-size:13px;padding:.35rem .6rem;
-         border:1px solid var(--border);border-radius:4px;background:var(--bg-secondary,#f5f5f7);
+         border:1px solid var(--border);border-radius:4px;background:var(--surface);
          color:var(--text);cursor:pointer;" onchange="setProjectFilter(this.value)">
     <option value="">All Projects</option>
     <option value="unassigned">Unassigned only</option>
@@ -238,12 +246,12 @@
   function renderCard(d) {
     const domain = d.url ? (() => { try { return new URL(d.url).hostname; } catch { return d.url; } })() : null;
     return `
-      <div class="card" id="dep-${d.id}">
+      <div class="card platform-${d.platform}" id="dep-${d.id}">
         <div class="card-header">
           <div>
             <div class="card-title">${escHtml(d.project_name)}</div>
             <div class="card-meta">
-              <span class="platform-badge">${escHtml(d.platform)}</span>
+              <span class="platform-badge platform-badge-${d.platform}">${escHtml(d.platform)}</span>
               ${d.created_at ? " · " + formatDate(d.created_at) : ""}
             </div>
           </div>
@@ -290,21 +298,47 @@
           ? deployments.map(renderCard).join("")
           : `<p style="color:var(--text-muted);font-size:13px;padding:.5rem 0;">No deployments in this project yet.</p>`);
     return `
-      <div style="margin-bottom:1.5rem;">
-        <div style="display:flex;align-items:center;gap:.75rem;margin-bottom:.5rem;padding-bottom:.4rem;
-                    border-bottom:2px solid var(--border);cursor:pointer;user-select:none;"
-             onclick="toggleProjectCollapse(${project.id})">
-          <span style="font-size:11px;color:var(--text-muted);width:10px;flex-shrink:0;">${chevron}</span>
-          <strong style="font-size:15px;">${escHtml(project.name)}</strong>
-          <span style="font-size:12px;color:var(--text-muted);">${deployments.length} deployment${deployments.length !== 1 ? "s" : ""}</span>
-          <button class="btn btn-danger" style="padding:.2rem .5rem;font-size:12px;margin-left:auto;"
-                  onclick="event.stopPropagation(); deleteProject(${project.id}, '${escHtml(project.name)}')">Delete project</button>
+      <div style="margin-bottom:1.75rem;">
+        <div class="project-section-header" onclick="toggleProjectCollapse(${project.id})">
+          <span class="project-chevron">${chevron}</span>
+          <strong style="font-size:15px;letter-spacing:-.2px;">${escHtml(project.name)}</strong>
+          <span class="project-count-pill">${deployments.length}</span>
+          <button class="btn btn-danger" style="padding:.2rem .55rem;font-size:12px;margin-left:auto;"
+                  onclick="event.stopPropagation(); deleteProject(${project.id}, '${escHtml(project.name)}')">Delete</button>
         </div>
         ${body}
       </div>`;
   }
 
+  function updateStats() {
+    const bar = document.getElementById("stats-bar");
+    if (!bar) return;
+    if (!allDeployments.length) { bar.innerHTML = ""; return; }
+    const live   = allDeployments.filter(d => ["ready","deployed"].includes((d.status||"").toLowerCase())).length;
+    const active = allDeployments.filter(d => PENDING_STATUSES.has((d.status||"").toLowerCase())).length;
+    let html = `<div class="stats-widget">
+      <div class="stats-widget-item">
+        <div class="stats-widget-value">${allDeployments.length}</div>
+        <div class="stats-widget-label">Total</div>
+      </div>
+      <div class="stats-widget-divider"></div>
+      <div class="stats-widget-item stats-widget-live">
+        <div class="stats-widget-value">${live}</div>
+        <div class="stats-widget-label">Live</div>
+      </div>`;
+    if (active) {
+      html += `<div class="stats-widget-divider"></div>
+      <div class="stats-widget-item stats-widget-active">
+        <div class="stats-widget-value">${active}</div>
+        <div class="stats-widget-label">Deploying</div>
+      </div>`;
+    }
+    html += `</div>`;
+    bar.innerHTML = html;
+  }
+
   function renderDashboard() {
+    updateStats();
     const list = document.getElementById("deployments-list");
 
     // Platform filter (client-side)
@@ -345,21 +379,22 @@
 
       if (unassigned.length) {
         const heading = allProjects.length
-          ? `<div style="display:flex;align-items:center;gap:.75rem;margin-bottom:.5rem;padding-bottom:.4rem;border-bottom:2px solid var(--border);">
-               <strong style="font-size:15px;">Unassigned</strong>
-               <span style="font-size:12px;color:var(--text-muted);">${unassigned.length} deployment${unassigned.length !== 1 ? "s" : ""}</span>
+          ? `<div class="project-section-header" style="cursor:default;" onclick="">
+               <strong style="font-size:15px;letter-spacing:-.2px;">Unassigned</strong>
+               <span class="project-count-pill">${unassigned.length}</span>
              </div>`
           : "";
-        html += `<div style="margin-bottom:1.5rem;">${heading}${unassigned.map(renderCard).join("")}</div>`;
+        html += `<div style="margin-bottom:1.75rem;">${heading}${unassigned.map(renderCard).join("")}</div>`;
       }
     }
 
     if (!html) {
       html = allDeployments.length
-        ? `<div class="empty-state"><p>No deployments match the current filter.</p></div>`
+        ? `<div class="empty-state"><span class="empty-state-icon">🔍</span><p>No deployments match the current filter.</p></div>`
         : `<div class="empty-state">
-            <p>No deployments yet.</p>
-            <a href="/deploy" class="btn btn-primary">Create your first deployment</a>
+            <span class="empty-state-icon">🚀</span>
+            <p>No deployments yet. Create your first one to get started.</p>
+            <a href="/deploy" class="btn btn-primary">+ New Deployment</a>
           </div>`;
     }
 
@@ -428,6 +463,8 @@
     try {
       const resp = await fetch("/api/projects/" + id, {method: "DELETE"});
       if (resp.ok) {
+        collapsedProjects.delete(id);
+        localStorage.setItem('collapsedProjects', JSON.stringify([...collapsedProjects]));
         await loadAll();
       } else {
         const data = await resp.json();
