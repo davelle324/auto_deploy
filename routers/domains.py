@@ -1,7 +1,7 @@
 """API routes for managing custom domains on platform deployments."""
 
 from fastapi import APIRouter, Depends, HTTPException
-from pydantic import BaseModel
+from pydantic import BaseModel, field_validator
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -17,6 +17,17 @@ class AddDomainRequest(BaseModel):
     """Request body for adding a custom domain."""
 
     domain: str
+
+    @field_validator("domain")
+    @classmethod
+    def strip_protocol(cls, v: str) -> str:
+        """Accept full URLs or bare hostnames; always send just the hostname."""
+        v = v.strip()
+        v = v.removeprefix("https://").removeprefix("http://")
+        v = v.strip("/")
+        if not v:
+            raise ValueError("domain cannot be empty")
+        return v
 
 
 async def _get_deployment_and_client(deployment_id: int, db: AsyncSession):
@@ -42,7 +53,10 @@ async def _get_deployment_and_client(deployment_id: int, db: AsyncSession):
 
 @router.get("/{deployment_id}/domains")
 async def list_domains(deployment_id: int, db: AsyncSession = Depends(get_db)):
-    """List custom domains for a deployment."""
+    """List domains for a deployment.
+
+    Returns the platform-assigned URL (read-only) plus any custom domains.
+    """
     deployment, client = await _get_deployment_and_client(deployment_id, db)
     try:
         domains = await client.list_domains(
@@ -50,7 +64,16 @@ async def list_domains(deployment_id: int, db: AsyncSession = Depends(get_db)):
         )
     except Exception as exc:
         raise HTTPException(status_code=502, detail=f"Platform API error: {exc}") from exc
-    return {"domains": domains}
+    platform_url = deployment.url or ""
+    # Deduplicate: the platform URL is shown separately as read-only, so remove it
+    # from the editable list if the platform API also returns it.
+    # Strip scheme for comparison since some platforms omit https:// in their domain list.
+    def _bare(url: str) -> str:
+        return url.removeprefix("https://").removeprefix("http://").rstrip("/")
+
+    platform_bare = _bare(platform_url)
+    filtered = [d for d in domains if d and _bare(d) != platform_bare]
+    return {"domains": filtered, "platform_url": platform_url}
 
 
 @router.post("/{deployment_id}/domains")

@@ -82,7 +82,8 @@ class RenderClient(BasePlatformClient):
                     headers=self._headers,
                 )
                 if get_resp.status_code == 200:
-                    url = self._extract_url(get_resp.json().get("service", {}))
+                    d = get_resp.json()
+                    url = self._extract_url(d.get("service", d))
 
             return DeployResult(
                 platform_deployment_id=service_id or "unknown",
@@ -181,7 +182,9 @@ class RenderClient(BasePlatformClient):
             )
             if resp.status_code != 200:
                 return {"build_command": "", "headers": []}
-            service = resp.json().get("service", {})
+            data = resp.json()
+            # Some Render endpoints wrap in {"service": {...}}, others return directly
+            service = data.get("service", data)
             details = service.get("serviceDetails", {})
             return {
                 "build_command": details.get("buildCommand", "") or "",
@@ -239,7 +242,8 @@ class RenderClient(BasePlatformClient):
             if resp.status_code == 404:
                 return "not_found"
             resp.raise_for_status()
-            service = resp.json().get("service", {})
+            data = resp.json()
+            service = data.get("service", data)
             suspended = service.get("suspended", "not_suspended")
             return "suspended" if suspended == "suspended" else "ready"
 
@@ -340,13 +344,18 @@ class RenderClient(BasePlatformClient):
         self, platform_deployment_id: str, project_name: str, domain: str
     ) -> None:
         """Add a custom domain to a Render service."""
+        if domain.lower().endswith(".onrender.com"):
+            raise ValueError(
+                ".onrender.com domains are platform-managed and cannot be added as custom domains"
+            )
         async with httpx.AsyncClient() as client:
             resp = await client.post(
                 f"{RENDER_API}/services/{platform_deployment_id}/custom-domains",
                 headers=self._headers,
                 json={"name": domain},
             )
-            resp.raise_for_status()
+            if resp.status_code >= 400:
+                raise ValueError(f"Render rejected domain '{domain}': {resp.status_code} — {resp.text}")
 
     async def remove_domain(
         self, platform_deployment_id: str, project_name: str, domain: str

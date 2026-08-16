@@ -6,7 +6,7 @@
 
 <div id="alert-box"></div>
 
-<div class="card" style="max-width:520px;">
+<div class="card" style="max-width:540px;">
   <form id="deploy-form">
     <div class="form-group">
       <label for="platform">Platform</label>
@@ -42,6 +42,52 @@
       <p class="form-hint">Group this deployment under an existing project.</p>
     </div>
 
+    <!-- Advanced options toggle -->
+    <div style="margin-top:.25rem;">
+      <button type="button" onclick="toggleAdvanced()"
+              style="background:none;border:none;cursor:pointer;font-size:13px;
+                     color:var(--accent);padding:0;display:flex;align-items:center;gap:.35rem;">
+        <span id="adv-icon" style="font-size:10px;">▶</span> Advanced Options
+      </button>
+    </div>
+
+    <!-- Advanced section -->
+    <div id="advanced-section" style="display:none;margin-top:.75rem;border:1px solid var(--border);
+         border-radius:8px;padding:.9rem;flex-direction:column;gap:.75rem;">
+
+      <!-- Env vars (all platforms) -->
+      <div>
+        <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:.4rem;">
+          <label style="font-size:13px;font-weight:600;margin:0;">
+            Environment Variables
+          </label>
+          <button type="button" class="btn btn-secondary" style="font-size:12px;padding:.2rem .5rem;"
+                  onclick="addEnvRow()">+ Add</button>
+        </div>
+        <div id="env-var-rows" style="display:flex;flex-direction:column;gap:.3rem;"></div>
+        <p style="font-size:12px;color:var(--text-muted);margin:.35rem 0 0;">
+          Set before the first deploy so the build can read them immediately.
+        </p>
+      </div>
+
+      <!-- Build config (Render only) -->
+      <div id="build-config-section" style="display:none;border-top:1px solid var(--border);padding-top:.75rem;
+           flex-direction:column;gap:.5rem;">
+        <label style="font-size:13px;font-weight:600;margin:0;">Build Config <span style="font-weight:400;color:var(--text-muted);">(Render)</span></label>
+        <input id="adv-build-cmd" type="text" placeholder="bash build.sh"
+               style="border:1px solid var(--border);border-radius:6px;padding:.4rem .65rem;
+                      font-size:13px;font-family:monospace;background:var(--surface);color:var(--text);">
+        <label style="display:flex;align-items:center;gap:.5rem;font-size:13px;cursor:pointer;">
+          <input type="checkbox" id="adv-cors-checkbox" checked>
+          Apply CORS headers <span style="color:var(--text-muted);">(Access-Control-Allow-Origin: *)</span>
+        </label>
+        <p style="font-size:12px;color:var(--text-muted);margin:0;">
+          Render ignores <code>render.yaml</code> for API-created services — set it here instead.
+        </p>
+      </div>
+
+    </div>
+
     <div style="display:flex;gap:.75rem;margin-top:1.5rem;">
       <button type="submit" class="btn btn-primary" id="submit-btn">Deploy</button>
       <a href="/" class="btn btn-secondary">Cancel</a>
@@ -52,15 +98,65 @@
 
 {% block scripts %}
 <script>
-  function showAlert(msg, type) {
-    const box = document.getElementById("alert-box");
-    box.innerHTML = `<div class="alert alert-${type}">${escHtml(msg)}</div>`;
-    box.scrollIntoView({behavior:"smooth"});
-  }
-
   function escHtml(str) {
     return String(str ?? "").replace(/[&<>"']/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
   }
+
+  function showAlert(msg, type) {
+    const box = document.getElementById("alert-box");
+    box.innerHTML = `<div class="alert alert-${type}">${msg}</div>`;
+    box.scrollIntoView({behavior:"smooth"});
+  }
+
+  // ── Advanced section ──────────────────────────────────────────────────────
+
+  let _advancedOpen = false;
+
+  function toggleAdvanced() {
+    _advancedOpen = !_advancedOpen;
+    const sec = document.getElementById("advanced-section");
+    sec.style.display = _advancedOpen ? "flex" : "none";
+    document.getElementById("adv-icon").textContent = _advancedOpen ? "▼" : "▶";
+    if (_advancedOpen && document.getElementById("env-var-rows").children.length === 0) {
+      addEnvRow();
+    }
+  }
+
+  function addEnvRow() {
+    const container = document.getElementById("env-var-rows");
+    const row = document.createElement("div");
+    row.style.cssText = "display:flex;gap:.3rem;align-items:center;";
+    row.innerHTML =
+      `<input type="text" placeholder="KEY" class="env-key-input"
+              style="flex:1;padding:.3rem .5rem;font-size:13px;border:1px solid var(--border);
+                     border-radius:4px;background:var(--surface);color:var(--text);font-family:monospace;">
+       <input type="text" placeholder="value" class="env-val-input"
+              style="flex:2;padding:.3rem .5rem;font-size:13px;border:1px solid var(--border);
+                     border-radius:4px;background:var(--surface);color:var(--text);font-family:monospace;">
+       <button type="button" class="btn btn-danger" style="padding:.2rem .4rem;font-size:11px;"
+               onclick="this.parentElement.remove()">✕</button>`;
+    container.appendChild(row);
+    row.querySelector(".env-key-input").focus();
+  }
+
+  function collectEnvVars() {
+    const rows = document.querySelectorAll("#env-var-rows > div");
+    const result = [];
+    for (const row of rows) {
+      const key = row.querySelector(".env-key-input").value.trim();
+      const value = row.querySelector(".env-val-input").value;
+      if (key) result.push({key, value});
+    }
+    return result;
+  }
+
+  // Show/hide build config when platform changes
+  document.getElementById("platform").addEventListener("change", function () {
+    const sec = document.getElementById("build-config-section");
+    sec.style.display = this.value === "render" ? "flex" : "none";
+  });
+
+  // ── Projects ──────────────────────────────────────────────────────────────
 
   async function loadProjects() {
     try {
@@ -68,7 +164,6 @@
       if (!resp.ok) return;
       const projects = await resp.json();
       const sel = document.getElementById("project_id");
-      // Keep only the first "No project" option, then repopulate
       sel.options.length = 1;
       for (const p of projects) {
         const opt = document.createElement("option");
@@ -76,8 +171,10 @@
         opt.textContent = p.name;
         sel.appendChild(opt);
       }
-    } catch { /* project field is optional — silently ignore */ }
+    } catch { /* optional — ignore */ }
   }
+
+  // ── Submit ────────────────────────────────────────────────────────────────
 
   document.getElementById("deploy-form").addEventListener("submit", async e => {
     e.preventDefault();
@@ -85,40 +182,84 @@
     btn.disabled = true;
     btn.textContent = "Deploying…";
 
-    const platform = document.getElementById("platform").value;
+    const platform     = document.getElementById("platform").value;
     const project_name = document.getElementById("project_name").value.trim().toLowerCase();
-    const repo_url = document.getElementById("repo_url").value.trim() || null;
-    const project_id = document.getElementById("project_id").value;
+    const repo_url     = document.getElementById("repo_url").value.trim() || null;
+    const project_id   = document.getElementById("project_id").value;
+    const envVars      = collectEnvVars();
+    const buildCmd     = (document.getElementById("adv-build-cmd")?.value || "").trim();
+    const applyCors    = document.getElementById("adv-cors-checkbox")?.checked ?? false;
 
     try {
+      // 1. Create deployment
       const resp = await fetch("/api/deployments/", {
         method: "POST",
         headers: {"Content-Type": "application/json"},
         body: JSON.stringify({platform, project_name, repo_url}),
       });
       const data = await resp.json();
+
       if (!resp.ok) {
         const detail = Array.isArray(data.detail)
           ? data.detail.map(e => e.msg).join("; ")
           : (data.detail || "Unknown error");
-        showAlert(detail, "error");
-      } else {
-        if (data.id && project_id) {
-          try {
-            await fetch("/api/deployments/" + data.id + "/project", {
-              method: "PATCH",
-              headers: {"Content-Type": "application/json"},
-              body: JSON.stringify({project_id: parseInt(project_id)}),
-            });
-          } catch { /* ignore — user can assign from dashboard */ }
-        }
-        showAlert(
-          `Deployment created! ${data.url ? `<a href="${escHtml(data.url)}" target="_blank">View site</a>` : "Check the platform dashboard for your URL."}`,
-          "success"
-        );
-        e.target.reset();
-        await loadProjects();
+        showAlert(escHtml(detail), "error");
+        return;
       }
+
+      const depId = data.id;
+      const warnings = [];
+
+      // 2. Assign project
+      if (depId && project_id) {
+        try {
+          await fetch(`/api/deployments/${depId}/project`, {
+            method: "PATCH",
+            headers: {"Content-Type": "application/json"},
+            body: JSON.stringify({project_id: parseInt(project_id)}),
+          });
+        } catch { warnings.push("Could not assign project."); }
+      }
+
+      // 3. Set env vars
+      if (depId && envVars.length) {
+        try {
+          const evResp = await fetch(`/api/deployments/${depId}/env`, {
+            method: "PUT",
+            headers: {"Content-Type": "application/json"},
+            body: JSON.stringify({env_vars: envVars}),
+          });
+          if (!evResp.ok) warnings.push("Env vars could not be saved — set them from the dashboard.");
+        } catch { warnings.push("Env vars could not be saved — set them from the dashboard."); }
+      }
+
+      // 4. Apply build config (Render only)
+      if (depId && platform === "render" && (buildCmd || applyCors)) {
+        try {
+          const bcResp = await fetch(`/api/deployments/${depId}/build`, {
+            method: "PATCH",
+            headers: {"Content-Type": "application/json"},
+            body: JSON.stringify({build_command: buildCmd, apply_cors: applyCors}),
+          });
+          if (!bcResp.ok) warnings.push("Build config could not be saved — set it from the dashboard.");
+        } catch { warnings.push("Build config could not be saved — set it from the dashboard."); }
+      }
+
+      const urlPart = data.url
+        ? ` <a href="${escHtml(data.url)}" target="_blank">View site →</a>`
+        : " Check the platform dashboard for your URL.";
+      const warnPart = warnings.length
+        ? `<br><span style="color:var(--warning);">⚠ ${warnings.map(escHtml).join(" ")}</span>`
+        : "";
+      showAlert(`Deployment created!${urlPart}${warnPart}`, "success");
+      e.target.reset();
+      document.getElementById("env-var-rows").innerHTML = "";
+      _advancedOpen = false;
+      document.getElementById("advanced-section").style.display = "none";
+      document.getElementById("adv-icon").textContent = "▶";
+      document.getElementById("build-config-section").style.display = "none";
+      await loadProjects();
+
     } catch {
       showAlert("Network error. Is the server running?", "error");
     } finally {

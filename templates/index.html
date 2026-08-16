@@ -407,7 +407,7 @@
           <button class="btn btn-secondary" style="padding:.2rem .55rem;font-size:12px;"
                   onclick="showEnvVars(${d.id}, '${escHtml(d.project_name)}')">⚙ Env Vars</button>
           <button class="btn btn-secondary" style="padding:.2rem .55rem;font-size:12px;"
-                  onclick="showDomains(${d.id}, '${escHtml(d.project_name)}')">🌐 Domains</button>
+                  onclick="showDomains(${d.id}, '${escHtml(d.project_name)}', '${d.platform}')">🌐 Domains</button>
           <button class="btn btn-secondary" style="padding:.2rem .55rem;font-size:12px;"
                   onclick="showHistory(${d.id}, '${escHtml(d.project_name)}')">🕓 History</button>
           ${d.platform === "render" ? `<button class="btn btn-secondary" style="padding:.2rem .55rem;font-size:12px;"
@@ -1053,9 +1053,11 @@
   // --- Domains modal ---
 
   let _domainsDepId = null;
+  let _domainsPlatform = null;
 
-  async function showDomains(id, name) {
+  async function showDomains(id, name, platform) {
     _domainsDepId = id;
+    _domainsPlatform = platform || null;
     const modal = document.getElementById("domains-modal");
     const body = document.getElementById("domains-modal-body");
     document.getElementById("domains-modal-title").textContent = `Domains — ${name}`;
@@ -1074,7 +1076,15 @@
         return;
       }
       const domains = data.domains || [];
+      const platformUrl = data.platform_url || "";
       let html = "";
+      if (platformUrl) {
+        html += `<div style="display:flex;align-items:center;justify-content:space-between;
+                             padding:.4rem 0;border-bottom:1px solid var(--border);font-size:13px;">
+          <span style="font-family:monospace;">${escHtml(platformUrl)}</span>
+          <span style="font-size:11px;color:var(--text-muted);padding:.15rem .4rem;">platform</span>
+        </div>`;
+      }
       for (const d of domains) {
         html += `<div style="display:flex;align-items:center;justify-content:space-between;
                              padding:.4rem 0;border-bottom:1px solid var(--border);font-size:13px;">
@@ -1083,13 +1093,19 @@
                   onclick="removeDomain('${escHtml(d)}')">✕</button>
         </div>`;
       }
-      if (!domains.length) html = "<p style='color:var(--text-muted);font-size:13px;'>No custom domains yet.</p>";
+      if (!platformUrl && !domains.length) html = "<p style='color:var(--text-muted);font-size:13px;'>No domains found.</p>";
+      const domainHint = _domainsPlatform === "vercel"
+        ? "Must end in <code>.vercel.app</code> (e.g. my-alias.vercel.app)"
+        : _domainsPlatform === "render"
+        ? "Render does not provide a domain — you must supply your own (e.g. example.com)"
+        : "";
       html += `<div style="display:flex;gap:.5rem;margin-top:1rem;flex-wrap:wrap;">
         <input id="domain-input" type="text" placeholder="example.com"
                style="padding:.35rem .6rem;font-size:13px;border:1px solid var(--border);
                       border-radius:4px;background:var(--surface);color:var(--text);flex:1;min-width:180px;">
         <button class="btn btn-primary" style="font-size:13px;" onclick="addDomain()">Add Domain</button>
       </div>
+      ${domainHint ? `<p style="font-size:12px;color:var(--text-muted);margin:.35rem 0 0;">${domainHint}</p>` : ""}
       <div id="domain-msg" style="margin-top:.5rem;font-size:13px;"></div>`;
       body.innerHTML = html;
     } catch {
@@ -1132,6 +1148,7 @@
   function closeDomainsModal() {
     document.getElementById("domains-modal").style.display = "none";
     _domainsDepId = null;
+    _domainsPlatform = null;
   }
 
   // --- History modal ---

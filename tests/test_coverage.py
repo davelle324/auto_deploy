@@ -807,6 +807,22 @@ async def test_render_add_domain():
 
 
 @pytest.mark.asyncio
+async def test_render_add_domain_rejects_onrender_com():
+    with pytest.raises(ValueError, match="onrender.com"):
+        await RenderClient("tok").add_domain("srv_abc", "proj", "foo.onrender.com")
+
+
+@pytest.mark.asyncio
+async def test_render_add_domain_400_raises_value_error():
+    bad_resp = _mock_response({"message": "already exists"}, status_code=400)
+    bad_resp.text = '{"message": "already exists"}'
+    mock_client = _make_async_client(post=[bad_resp])
+    with patch("integrations.render.httpx.AsyncClient", return_value=mock_client):
+        with pytest.raises(ValueError, match="400"):
+            await RenderClient("tok").add_domain("srv_abc", "proj", "example.com")
+
+
+@pytest.mark.asyncio
 async def test_render_remove_domain():
     ok_resp = _mock_response({}, status_code=204)
     mock_client = _make_async_client(delete=ok_resp)
@@ -974,6 +990,28 @@ async def test_domains_list_platform_502(client):
         MC.return_value.list_domains = AsyncMock(side_effect=RuntimeError("fail"))
         resp = await client.get(f"/api/deployments/{dep_id}/domains")
     assert resp.status_code == 502
+
+
+@pytest.mark.asyncio
+async def test_domains_add_strips_protocol(client):
+    dep_id = await _seed(client)
+    with patch("routers.deployments.VercelClient") as MC:
+        MC.return_value.add_domain = AsyncMock(return_value=None)
+        resp = await client.post(
+            f"/api/deployments/{dep_id}/domains",
+            json={"domain": "https://example.com/"},
+        )
+    assert resp.status_code == 200
+    MC.return_value.add_domain.assert_called_once()
+    called_domain = MC.return_value.add_domain.call_args.args[2]
+    assert called_domain == "example.com"
+
+
+@pytest.mark.asyncio
+async def test_domains_add_empty_domain_422(client):
+    dep_id = await _seed(client)
+    resp = await client.post(f"/api/deployments/{dep_id}/domains", json={"domain": "https://"})
+    assert resp.status_code == 422
 
 
 @pytest.mark.asyncio
