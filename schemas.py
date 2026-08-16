@@ -144,3 +144,22 @@ class AssignProjectRequest(BaseModel):
     """Request body for assigning (or unassigning) a deployment to a project."""
 
     project_id: Optional[int] = None
+
+
+class BuildSettingsRequest(BaseModel):
+    """Request body for updating a Render service's build command and CORS headers."""
+
+    build_command: str
+    apply_cors: bool = True
+
+
+class DeploymentEventResponse(BaseModel):
+    """Response for a single deployment event record."""
+
+    id: int
+    deployment_id: int
+    platform_event_id: Optional[str] = None
+    status: str
+    triggered_at: datetime
+
+    model_config = {"from_attributes": True}

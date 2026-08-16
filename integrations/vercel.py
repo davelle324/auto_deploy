@@ -1,6 +1,7 @@
 """Vercel REST API client."""
 
 import hashlib
+import json
 from typing import Optional
 
 import httpx
@@ -414,3 +415,123 @@ class VercelClient(BasePlatformClient):
                 return "not_found"
             resp.raise_for_status()
             return resp.json().get("readyState", "unknown").lower()
+
+    async def get_deployment_logs(
+        self, platform_deployment_id: str, project_name: str
+    ) -> list[str]:
+        """Fetch build log lines for a Vercel deployment via the events endpoint."""
+        async with httpx.AsyncClient() as client:
+            resp = await client.get(
+                f"{VERCEL_API}/v2/deployments/{platform_deployment_id}/events",
+                headers=self._headers,
+                params={"types": "command,stdout,stderr,exit"},
+            )
+            if resp.status_code != 200:
+                return []
+            lines = []
+            for raw_line in resp.text.splitlines():
+                raw_line = raw_line.strip()
+                if not raw_line:
+                    continue
+                try:
+                    event = json.loads(raw_line)
+                    text = event.get("payload", {}).get("text", "")
+                    if text:
+                        lines.append(text)
+                except (json.JSONDecodeError, AttributeError):
+                    lines.append(raw_line)
+            return lines
+
+    async def list_env_vars(
+        self, platform_deployment_id: str, project_name: str
+    ) -> list[dict]:
+        """Return env vars for a Vercel project as [{key, value, id}] dicts."""
+        async with httpx.AsyncClient() as client:
+            resp = await client.get(
+                f"{VERCEL_API}/v9/projects/{project_name}/env",
+                headers=self._headers,
+            )
+            if resp.status_code != 200:
+                return []
+            return [
+                {"key": e.get("key", ""), "value": e.get("value", ""), "id": e.get("id", "")}
+                for e in resp.json().get("envs", [])
+            ]
+
+    async def set_env_vars(
+        self, platform_deployment_id: str, project_name: str, env_vars: list[dict]
+    ) -> None:
+        """Upsert env vars on a Vercel project (creates each var individually)."""
+        async with httpx.AsyncClient() as client:
+            existing = await self.list_env_vars(platform_deployment_id, project_name)
+            existing_map = {e["key"]: e["id"] for e in existing if e.get("id")}
+            for ev in env_vars:
+                key, value = ev["key"], ev["value"]
+                if key in existing_map:
+                    await client.patch(
+                        f"{VERCEL_API}/v9/projects/{project_name}/env/{existing_map[key]}",
+                        headers=self._headers,
+                        json={"value": value},
+                    )
+                else:
+                    await client.post(
+                        f"{VERCEL_API}/v9/projects/{project_name}/env",
+                        headers=self._headers,
+                        json={
+                            "key": key,
+                            "value": value,
+                            "type": "plain",
+                            "target": ["production", "preview", "development"],
+                        },
+                    )
+
+    async def delete_env_var(
+        self, platform_deployment_id: str, project_name: str, key: str
+    ) -> None:
+        """Delete an env var from a Vercel project by key."""
+        existing = await self.list_env_vars(platform_deployment_id, project_name)
+        for ev in existing:
+            if ev["key"] == key and ev.get("id"):
+                async with httpx.AsyncClient() as client:
+                    await client.delete(
+                        f"{VERCEL_API}/v9/projects/{project_name}/env/{ev['id']}",
+                        headers=self._headers,
+                    )
+                return
+
+    async def list_domains(
+        self, platform_deployment_id: str, project_name: str
+    ) -> list[str]:
+        """Return custom domains for a Vercel project."""
+        async with httpx.AsyncClient() as client:
+            resp = await client.get(
+                f"{VERCEL_API}/v9/projects/{project_name}/domains",
+                headers=self._headers,
+            )
+            if resp.status_code != 200:
+                return []
+            return [d.get("name", "") for d in resp.json().get("domains", []) if d.get("name")]
+
+    async def add_domain(
+        self, platform_deployment_id: str, project_name: str, domain: str
+    ) -> None:
+        """Add a custom domain to a Vercel project."""
+        async with httpx.AsyncClient() as client:
+            resp = await client.post(
+                f"{VERCEL_API}/v9/projects/{project_name}/domains",
+                headers=self._headers,
+                json={"name": domain},
+            )
+            resp.raise_for_status()
+
+    async def remove_domain(
+        self, platform_deployment_id: str, project_name: str, domain: str
+    ) -> None:
+        """Remove a custom domain from a Vercel project."""
+        async with httpx.AsyncClient() as client:
+            resp = await client.delete(
+                f"{VERCEL_API}/v9/projects/{project_name}/domains/{domain}",
+                headers=self._headers,
+            )
+            if resp.status_code not in (200, 204, 404):
+                resp.raise_for_status()

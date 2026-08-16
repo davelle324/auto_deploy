@@ -13,6 +13,8 @@
 <div class="action-bar">
   <a href="/deploy" class="btn btn-primary">+ New Deployment</a>
   <button class="btn btn-secondary" onclick="loadAll()">↻ Refresh</button>
+  <button class="btn btn-secondary" id="sync-all-btn" onclick="syncAll()">↻ Sync All</button>
+  <span id="sync-all-msg" style="font-size:13px;color:var(--text-muted);"></span>
 </div>
 
 <!-- Project management -->
@@ -60,6 +62,12 @@
     <option value="">All Projects</option>
     <option value="unassigned">Unassigned only</option>
   </select>
+
+  <input id="search-input" type="search" placeholder="Search deployments…"
+         style="font-size:13px;padding:.35rem .6rem;border:1px solid var(--border);
+                border-radius:4px;background:var(--surface);color:var(--text);
+                min-width:200px;"
+         oninput="setSearch(this.value)">
 </div>
 
 <div style="display:flex;gap:.5rem;flex-wrap:wrap;margin-bottom:1rem;">
@@ -73,12 +81,92 @@
 <div id="deployments-list">
   <p class="loading">Loading…</p>
 </div>
+
+<!-- History modal -->
+<div id="history-modal" style="display:none;position:fixed;inset:0;z-index:1000;background:rgba(0,0,0,.5);
+     align-items:center;justify-content:center;">
+  <div style="background:var(--surface);border:1px solid var(--border);border-radius:10px;
+              width:min(550px,95vw);max-height:80vh;display:flex;flex-direction:column;overflow:hidden;">
+    <div style="display:flex;align-items:center;justify-content:space-between;padding:.75rem 1rem;
+                border-bottom:1px solid var(--border);">
+      <strong id="history-modal-title" style="font-size:15px;">Deploy History</strong>
+      <button onclick="closeHistoryModal()" style="border:none;background:none;cursor:pointer;
+              font-size:18px;color:var(--text-muted);">×</button>
+    </div>
+    <div id="history-modal-body" style="padding:1rem;overflow:auto;flex:1;">Loading…</div>
+  </div>
+</div>
+
+<!-- Logs modal -->
+<div id="logs-modal" style="display:none;position:fixed;inset:0;z-index:1000;background:rgba(0,0,0,.5);
+     align-items:center;justify-content:center;">
+  <div style="background:var(--surface);border:1px solid var(--border);border-radius:10px;
+              width:min(700px,95vw);max-height:80vh;display:flex;flex-direction:column;overflow:hidden;">
+    <div style="display:flex;align-items:center;justify-content:space-between;padding:.75rem 1rem;
+                border-bottom:1px solid var(--border);">
+      <strong id="logs-modal-title" style="font-size:15px;">Build Logs</strong>
+      <button onclick="closeLogs()" style="border:none;background:none;cursor:pointer;
+              font-size:18px;color:var(--text-muted);">×</button>
+    </div>
+    <pre id="logs-modal-body" style="margin:0;padding:1rem;overflow:auto;font-size:12px;
+         line-height:1.5;white-space:pre-wrap;word-break:break-all;
+         background:var(--bg);color:var(--text);flex:1;">Loading…</pre>
+  </div>
+</div>
+
+<!-- Env vars modal -->
+<div id="env-modal" style="display:none;position:fixed;inset:0;z-index:1000;background:rgba(0,0,0,.5);
+     align-items:center;justify-content:center;">
+  <div style="background:var(--surface);border:1px solid var(--border);border-radius:10px;
+              width:min(600px,95vw);max-height:80vh;display:flex;flex-direction:column;overflow:hidden;">
+    <div style="display:flex;align-items:center;justify-content:space-between;padding:.75rem 1rem;
+                border-bottom:1px solid var(--border);">
+      <strong id="env-modal-title" style="font-size:15px;">Environment Variables</strong>
+      <button onclick="closeEnvModal()" style="border:none;background:none;cursor:pointer;
+              font-size:18px;color:var(--text-muted);">×</button>
+    </div>
+    <div id="env-modal-body" style="padding:1rem;overflow:auto;flex:1;">Loading…</div>
+  </div>
+</div>
+
+<!-- Domains modal -->
+<div id="domains-modal" style="display:none;position:fixed;inset:0;z-index:1000;background:rgba(0,0,0,.5);
+     align-items:center;justify-content:center;">
+  <div style="background:var(--surface);border:1px solid var(--border);border-radius:10px;
+              width:min(500px,95vw);max-height:80vh;display:flex;flex-direction:column;overflow:hidden;">
+    <div style="display:flex;align-items:center;justify-content:space-between;padding:.75rem 1rem;
+                border-bottom:1px solid var(--border);">
+      <strong id="domains-modal-title" style="font-size:15px;">Custom Domains</strong>
+      <button onclick="closeDomainsModal()" style="border:none;background:none;cursor:pointer;
+              font-size:18px;color:var(--text-muted);">×</button>
+    </div>
+    <div id="domains-modal-body" style="padding:1rem;overflow:auto;flex:1;">Loading…</div>
+  </div>
+</div>
+
+<div id="build-modal" style="display:none;position:fixed;inset:0;z-index:1000;background:rgba(0,0,0,.5);
+     align-items:center;justify-content:center;">
+  <div style="background:var(--surface);border:1px solid var(--border);border-radius:10px;
+              width:min(520px,95vw);display:flex;flex-direction:column;overflow:hidden;">
+    <div style="display:flex;align-items:center;justify-content:space-between;padding:.75rem 1rem;
+                border-bottom:1px solid var(--border);">
+      <strong id="build-modal-title" style="font-size:15px;">Build Config</strong>
+      <button onclick="closeBuildModal()" style="border:none;background:none;cursor:pointer;
+              font-size:18px;color:var(--text-muted);">✕</button>
+    </div>
+    <div id="build-modal-body" style="padding:1rem;overflow:auto;max-height:65vh;">
+      <p style="color:var(--text-muted);font-size:13px;">Loading…</p>
+    </div>
+  </div>
+</div>
+
 {% endblock %}
 
 {% block scripts %}
 <script>
   let selectedPlatforms = new Set();  // empty = all platforms
   let projectFilter = "";             // "" = all, "unassigned", or "<id>"
+  let searchQuery = "";
   let allProjects = [];
   let allDeployments = [];
   let collapsedProjects = new Set(JSON.parse(localStorage.getItem('collapsedProjects') || '[]'));
@@ -166,6 +254,20 @@
     renderDashboard();
   }
 
+  function setSearch(value) {
+    searchQuery = value.trim().toLowerCase();
+    renderDashboard();
+  }
+
+  function matchesSearch(d) {
+    if (!searchQuery) return true;
+    return (d.project_name || "").toLowerCase().includes(searchQuery) ||
+           (d.status || "").toLowerCase().includes(searchQuery) ||
+           (d.platform || "").toLowerCase().includes(searchQuery) ||
+           (d.url || "").toLowerCase().includes(searchQuery) ||
+           (d.repo_url || "").toLowerCase().includes(searchQuery);
+  }
+
   function updateProjectFilterSelect() {
     const sel = document.getElementById("project-filter-select");
     const current = projectFilter;
@@ -202,7 +304,7 @@
       `<option value="${p.id}" ${d.project_id === p.id ? "selected" : ""}>${escHtml(p.name)}</option>`
     ).join("");
     return `<select style="font-size:12px;border:1px solid var(--border);border-radius:4px;
-                            padding:.15rem .35rem;background:var(--bg-secondary,#f5f5f7);color:var(--text);
+                            padding:.15rem .35rem;background:var(--surface);color:var(--text);
                             cursor:pointer;"
                     onchange="assignProject(${d.id}, this.value)">
       <option value="">— no project —</option>
@@ -261,9 +363,24 @@
                     title="Sync status from platform" onclick="syncDeployment(${d.id})">↻</button>
             <button class="btn btn-secondary" style="padding:.25rem .6rem;font-size:12px;"
                     title="Deploy latest commit" onclick="redeployDeployment(${d.id})">▶ Deploy</button>
-            <button class="btn btn-danger" style="padding:.25rem .6rem;font-size:12px;"
-                    title="Delete on platform and remove from list"
-                    onclick="removeDeployment(${d.id}, '${escHtml(d.platform)}', '${escHtml(d.project_name)}')">✕</button>
+            <div style="position:relative;display:inline-block;" class="delete-dd-wrap">
+              <button class="btn btn-danger" style="padding:.25rem .5rem;font-size:12px;display:flex;align-items:center;gap:.2rem;"
+                      onclick="toggleDeleteMenu(${d.id})">✕ <span style="font-size:9px;">▾</span></button>
+              <div id="delete-menu-${d.id}" style="display:none;position:absolute;right:0;top:calc(100% + 3px);z-index:300;
+                   background:var(--surface);border:1px solid var(--border);border-radius:6px;
+                   min-width:180px;box-shadow:0 2px 8px rgba(0,0,0,.15);overflow:hidden;">
+                <button style="width:100%;text-align:left;padding:.5rem .75rem;font-size:13px;
+                               border:none;background:none;cursor:pointer;color:var(--danger);"
+                        onclick="removeDeployment(${d.id}, '${escHtml(d.platform)}', '${escHtml(d.project_name)}')">
+                  Delete on platform
+                </button>
+                <button style="width:100%;text-align:left;padding:.5rem .75rem;font-size:13px;
+                               border:none;background:none;cursor:pointer;color:var(--text-muted);"
+                        onclick="untrackDeployment(${d.id}, '${escHtml(d.project_name)}')">
+                  Remove from tracking
+                </button>
+              </div>
+            </div>
           </div>
         </div>
         ${domain ? `
@@ -284,6 +401,18 @@
         <div style="margin-top:.4rem;font-size:12px;color:var(--text-muted);display:flex;align-items:center;gap:.4rem;">
           Project: ${projectSelector(d)}
         </div>
+        <div style="margin-top:.4rem;display:flex;gap:.4rem;flex-wrap:wrap;">
+          <button class="btn btn-secondary" style="padding:.2rem .55rem;font-size:12px;"
+                  onclick="showLogs(${d.id}, '${escHtml(d.project_name)}')">📋 Logs</button>
+          <button class="btn btn-secondary" style="padding:.2rem .55rem;font-size:12px;"
+                  onclick="showEnvVars(${d.id}, '${escHtml(d.project_name)}')">⚙ Env Vars</button>
+          <button class="btn btn-secondary" style="padding:.2rem .55rem;font-size:12px;"
+                  onclick="showDomains(${d.id}, '${escHtml(d.project_name)}')">🌐 Domains</button>
+          <button class="btn btn-secondary" style="padding:.2rem .55rem;font-size:12px;"
+                  onclick="showHistory(${d.id}, '${escHtml(d.project_name)}')">🕓 History</button>
+          ${d.platform === "render" ? `<button class="btn btn-secondary" style="padding:.2rem .55rem;font-size:12px;"
+                  onclick="showBuildConfig(${d.id}, '${escHtml(d.project_name)}')">🔧 Build Config</button>` : ""}
+        </div>
         <div id="msg-${d.id}" style="margin-top:.4rem;font-size:13px;"></div>
         ${repoSection(d)}
       </div>`;
@@ -303,8 +432,21 @@
           <span class="project-chevron">${chevron}</span>
           <strong style="font-size:15px;letter-spacing:-.2px;">${escHtml(project.name)}</strong>
           <span class="project-count-pill">${deployments.length}</span>
-          <button class="btn btn-danger" style="padding:.2rem .55rem;font-size:12px;margin-left:auto;"
-                  onclick="event.stopPropagation(); deleteProject(${project.id}, '${escHtml(project.name)}')">Delete</button>
+          <span id="proj-msg-${project.id}" style="font-size:12px;color:var(--text-muted);margin-left:.5rem;"></span>
+          <div style="display:flex;gap:.35rem;margin-left:auto;" onclick="event.stopPropagation()">
+            <button class="btn btn-secondary" id="proj-refresh-${project.id}"
+                    style="padding:.2rem .55rem;font-size:12px;"
+                    onclick="refreshProject(${project.id})" title="Re-fetch from local DB">↺ Refresh</button>
+            <button class="btn btn-secondary" id="proj-sync-${project.id}"
+                    style="padding:.2rem .55rem;font-size:12px;"
+                    onclick="syncProject(${project.id})" title="Sync all from platform API">↻ Sync All</button>
+            <button class="btn btn-secondary" id="proj-deploy-${project.id}"
+                    style="padding:.2rem .55rem;font-size:12px;"
+                    onclick="deployProject(${project.id})" title="Redeploy all in this project">▶ Deploy All</button>
+            <button class="btn btn-danger"
+                    style="padding:.2rem .55rem;font-size:12px;"
+                    onclick="deleteProject(${project.id}, '${escHtml(project.name)}')">Delete</button>
+          </div>
         </div>
         ${body}
       </div>`;
@@ -341,10 +483,11 @@
     updateStats();
     const list = document.getElementById("deployments-list");
 
-    // Platform filter (client-side)
-    const filtered = selectedPlatforms.size > 0
-      ? allDeployments.filter(d => selectedPlatforms.has(d.platform))
-      : [...allDeployments];
+    // Platform + search filter (client-side)
+    const filtered = allDeployments.filter(d =>
+      (selectedPlatforms.size === 0 || selectedPlatforms.has(d.platform)) &&
+      matchesSearch(d)
+    );
 
     let html = "";
 
@@ -494,6 +637,113 @@
 
   // --- Deployment actions ---
 
+  async function syncAll() {
+    const btn = document.getElementById("sync-all-btn");
+    const msg = document.getElementById("sync-all-msg");
+    const syncable = allDeployments.filter(d =>
+      d.platform_deployment_id && !["pending", "unknown"].includes(d.platform_deployment_id)
+    );
+    if (!syncable.length) { if (msg) msg.textContent = "Nothing to sync."; return; }
+    if (btn) btn.disabled = true;
+    if (msg) msg.textContent = `Syncing 0 / ${syncable.length}…`;
+    let done = 0;
+    for (const d of syncable) {
+      try {
+        const resp = await fetch("/api/deployments/" + d.id + "/sync", {method: "POST"});
+        if (resp.ok) {
+          const updated = await resp.json();
+          const idx = allDeployments.findIndex(x => x.id === d.id);
+          if (idx !== -1) allDeployments[idx] = updated;
+        }
+      } catch { /* continue on error */ }
+      done++;
+      if (msg) msg.textContent = `Syncing ${done} / ${syncable.length}…`;
+    }
+    renderDashboard();
+    if (btn) btn.disabled = false;
+    if (msg) msg.textContent = `Synced ${done} deployment${done !== 1 ? "s" : ""}.`;
+    setTimeout(() => { if (msg) msg.textContent = ""; }, 3000);
+  }
+
+  function _projFeedback(projectId, text, clear) {
+    const el = document.getElementById("proj-msg-" + projectId);
+    if (el) el.textContent = text;
+    if (clear) setTimeout(() => { if (el) el.textContent = ""; }, 3000);
+  }
+
+  function _projSetButtons(projectId, disabled) {
+    ["refresh", "sync", "deploy"].forEach(action => {
+      const btn = document.getElementById("proj-" + action + "-" + projectId);
+      if (btn) btn.disabled = disabled;
+    });
+  }
+
+  async function refreshProject(projectId) {
+    _projSetButtons(projectId, true);
+    _projFeedback(projectId, "Refreshing…");
+    try {
+      const resp = await fetch("/api/deployments/");
+      if (resp.ok) {
+        const all = await resp.json();
+        allDeployments = all;
+        renderDashboard();
+        _projFeedback(projectId, "Refreshed.", true);
+      }
+    } catch { _projFeedback(projectId, "Error.", true); }
+    _projSetButtons(projectId, false);
+  }
+
+  async function syncProject(projectId) {
+    const targets = allDeployments.filter(d =>
+      d.project_id === projectId &&
+      d.platform_deployment_id &&
+      !["pending", "unknown"].includes(d.platform_deployment_id)
+    );
+    if (!targets.length) { _projFeedback(projectId, "Nothing to sync.", true); return; }
+    _projSetButtons(projectId, true);
+    let done = 0;
+    _projFeedback(projectId, `Syncing 0 / ${targets.length}…`);
+    for (const d of targets) {
+      try {
+        const resp = await fetch("/api/deployments/" + d.id + "/sync", {method: "POST"});
+        if (resp.ok) {
+          const updated = await resp.json();
+          const idx = allDeployments.findIndex(x => x.id === d.id);
+          if (idx !== -1) allDeployments[idx] = updated;
+        }
+      } catch { /* continue */ }
+      done++;
+      _projFeedback(projectId, `Syncing ${done} / ${targets.length}…`);
+    }
+    renderDashboard();
+    _projSetButtons(projectId, false);
+    _projFeedback(projectId, `Synced ${done}.`, true);
+  }
+
+  async function deployProject(projectId) {
+    const targets = allDeployments.filter(d => d.project_id === projectId);
+    if (!targets.length) { _projFeedback(projectId, "No deployments.", true); return; }
+    if (!confirm(`Redeploy all ${targets.length} deployment${targets.length !== 1 ? "s" : ""} in this project?`)) return;
+    _projSetButtons(projectId, true);
+    let done = 0;
+    _projFeedback(projectId, `Deploying 0 / ${targets.length}…`);
+    for (const d of targets) {
+      try {
+        const resp = await fetch("/api/deployments/" + d.id + "/redeploy", {method: "POST"});
+        if (resp.ok) {
+          const updated = await resp.json();
+          const idx = allDeployments.findIndex(x => x.id === d.id);
+          if (idx !== -1) allDeployments[idx] = updated;
+        }
+      } catch { /* continue */ }
+      done++;
+      _projFeedback(projectId, `Deploying ${done} / ${targets.length}…`);
+    }
+    renderDashboard();
+    _projSetButtons(projectId, false);
+    _projFeedback(projectId, `Triggered ${done} deployment${done !== 1 ? "s" : ""}.`, true);
+  }
+
   async function syncDeployment(id) {
     const badge = document.getElementById("badge-" + id);
     const msg = document.getElementById("msg-" + id);
@@ -538,6 +788,38 @@
       }
     } catch {
       if (msg) msg.innerHTML = '<span style="color:var(--danger)">Network error</span>';
+    }
+  }
+
+  function toggleDeleteMenu(id) {
+    const menu = document.getElementById("delete-menu-" + id);
+    if (!menu) return;
+    const isOpen = menu.style.display !== "none";
+    document.querySelectorAll("[id^='delete-menu-']").forEach(m => { m.style.display = "none"; });
+    menu.style.display = isOpen ? "none" : "block";
+  }
+
+  document.addEventListener("click", e => {
+    if (!e.target.closest(".delete-dd-wrap")) {
+      document.querySelectorAll("[id^='delete-menu-']").forEach(m => { m.style.display = "none"; });
+    }
+  });
+
+  async function untrackDeployment(id, name) {
+    if (!confirm(`Remove "${name}" from tracking?\n\nThe project will remain on the platform — only removed from this list.`)) return;
+    const msg = document.getElementById("msg-" + id);
+    try {
+      const resp = await fetch("/api/deployments/" + id + "/untrack", {method: "DELETE"});
+      if (resp.ok) {
+        stopPolling(id);
+        allDeployments = allDeployments.filter(d => d.id !== id);
+        renderDashboard();
+      } else {
+        const data = await resp.json();
+        if (msg) msg.innerHTML = '<span style="color:var(--danger)">' + escHtml(data.detail || "Failed") + "</span>";
+      }
+    } catch {
+      if (msg) msg.innerHTML = '<span style="color:var(--danger)">Network error.</span>';
     }
   }
 
@@ -623,6 +905,409 @@
     if (e.key === "Enter") createProject();
     if (e.key === "Escape") toggleNewProjectForm();
   });
+
+  // Close modals on backdrop click
+  ["logs-modal", "env-modal", "domains-modal", "history-modal", "build-modal"].forEach(id => {
+    document.getElementById(id).addEventListener("click", e => {
+      if (e.target.id === id) e.target.style.display = "none";
+    });
+  });
+
+  // Close modals on Escape key
+  document.addEventListener("keydown", e => {
+    if (e.key === "Escape") {
+      closeLogs(); closeEnvModal(); closeDomainsModal(); closeHistoryModal(); closeBuildModal();
+    }
+  });
+
+  // --- Logs modal ---
+
+  async function showLogs(id, name) {
+    const modal = document.getElementById("logs-modal");
+    const body = document.getElementById("logs-modal-body");
+    document.getElementById("logs-modal-title").textContent = `Build Logs — ${name}`;
+    body.textContent = "Loading…";
+    modal.style.display = "flex";
+    try {
+      const resp = await fetch("/api/deployments/" + id + "/logs");
+      const data = await resp.json();
+      if (!resp.ok) {
+        body.textContent = data.detail || "Failed to load logs.";
+      } else {
+        const lines = data.lines || [];
+        body.textContent = lines.length ? lines.join("\n") : "(No log output available yet.)";
+      }
+    } catch {
+      body.textContent = "Network error loading logs.";
+    }
+  }
+
+  function closeLogs() {
+    document.getElementById("logs-modal").style.display = "none";
+  }
+
+  // --- Env vars modal ---
+
+  let _envDepId = null;
+
+  async function showEnvVars(id, name) {
+    _envDepId = id;
+    const modal = document.getElementById("env-modal");
+    const body = document.getElementById("env-modal-body");
+    document.getElementById("env-modal-title").textContent = `Env Vars — ${name}`;
+    body.innerHTML = "<p style='color:var(--text-muted)'>Loading…</p>";
+    modal.style.display = "flex";
+    await refreshEnvVars();
+  }
+
+  async function refreshEnvVars() {
+    const body = document.getElementById("env-modal-body");
+    try {
+      const resp = await fetch("/api/deployments/" + _envDepId + "/env");
+      const data = await resp.json();
+      if (!resp.ok) {
+        body.innerHTML = `<p style='color:var(--danger)'>${escHtml(data.detail || "Failed")}</p>`;
+        return;
+      }
+      const vars = data.env_vars || [];
+      let html = vars.length
+        ? `<table style="width:100%;border-collapse:collapse;font-size:13px;">
+             <thead><tr>
+               <th style="text-align:left;padding:.3rem .5rem;border-bottom:1px solid var(--border);">Key</th>
+               <th style="text-align:left;padding:.3rem .5rem;border-bottom:1px solid var(--border);">Value</th>
+               <th style="padding:.3rem;border-bottom:1px solid var(--border);"></th>
+             </tr></thead><tbody>`
+        : "";
+      for (const v of vars) {
+        html += `<tr>
+          <td style="padding:.3rem .5rem;font-family:monospace;">${escHtml(v.key)}</td>
+          <td style="padding:.3rem .5rem;font-family:monospace;word-break:break-all;">${escHtml(v.value)}</td>
+          <td style="padding:.3rem;">
+            <button class="btn btn-danger" style="padding:.15rem .4rem;font-size:11px;"
+                    onclick="deleteEnvVar('${escHtml(v.key)}')">✕</button>
+          </td>
+        </tr>`;
+      }
+      if (vars.length) html += "</tbody></table>";
+      html += `<div style="margin-top:1rem;display:flex;gap:.4rem;flex-wrap:wrap;align-items:flex-end;">
+        <div>
+          <label style="font-size:12px;color:var(--text-muted);">Key</label><br>
+          <input id="env-new-key" type="text" placeholder="KEY"
+                 style="padding:.3rem .5rem;font-size:13px;border:1px solid var(--border);
+                        border-radius:4px;background:var(--surface);color:var(--text);
+                        font-family:monospace;width:140px;">
+        </div>
+        <div>
+          <label style="font-size:12px;color:var(--text-muted);">Value</label><br>
+          <input id="env-new-val" type="text" placeholder="value"
+                 style="padding:.3rem .5rem;font-size:13px;border:1px solid var(--border);
+                        border-radius:4px;background:var(--surface);color:var(--text);
+                        font-family:monospace;width:200px;">
+        </div>
+        <button class="btn btn-primary" style="font-size:13px;" onclick="addEnvVar()">Add / Update</button>
+      </div>
+      <div id="env-msg" style="margin-top:.5rem;font-size:13px;"></div>`;
+      body.innerHTML = html;
+    } catch {
+      body.innerHTML = "<p style='color:var(--danger)'>Network error.</p>";
+    }
+  }
+
+  async function addEnvVar() {
+    const key = (document.getElementById("env-new-key")?.value || "").trim();
+    const value = document.getElementById("env-new-val")?.value || "";
+    const msg = document.getElementById("env-msg");
+    if (!key) { if (msg) msg.innerHTML = '<span style="color:var(--danger)">Key required.</span>'; return; }
+    try {
+      const resp = await fetch("/api/deployments/" + _envDepId + "/env", {
+        method: "PUT",
+        headers: {"Content-Type": "application/json"},
+        body: JSON.stringify({env_vars: [{key, value}]}),
+      });
+      if (!resp.ok) {
+        const data = await resp.json();
+        if (msg) msg.innerHTML = `<span style="color:var(--danger)">${escHtml(data.detail || "Failed")}</span>`;
+      } else {
+        await refreshEnvVars();
+      }
+    } catch {
+      if (msg) msg.innerHTML = '<span style="color:var(--danger)">Network error.</span>';
+    }
+  }
+
+  async function deleteEnvVar(key) {
+    if (!confirm(`Delete env var "${key}"?`)) return;
+    try {
+      const resp = await fetch("/api/deployments/" + _envDepId + "/env/" + encodeURIComponent(key), {
+        method: "DELETE",
+      });
+      if (resp.ok) await refreshEnvVars();
+    } catch { /* silently ignore */ }
+  }
+
+  function closeEnvModal() {
+    document.getElementById("env-modal").style.display = "none";
+    _envDepId = null;
+  }
+
+  // --- Domains modal ---
+
+  let _domainsDepId = null;
+
+  async function showDomains(id, name) {
+    _domainsDepId = id;
+    const modal = document.getElementById("domains-modal");
+    const body = document.getElementById("domains-modal-body");
+    document.getElementById("domains-modal-title").textContent = `Domains — ${name}`;
+    body.innerHTML = "<p style='color:var(--text-muted)'>Loading…</p>";
+    modal.style.display = "flex";
+    await refreshDomains();
+  }
+
+  async function refreshDomains() {
+    const body = document.getElementById("domains-modal-body");
+    try {
+      const resp = await fetch("/api/deployments/" + _domainsDepId + "/domains");
+      const data = await resp.json();
+      if (!resp.ok) {
+        body.innerHTML = `<p style='color:var(--danger)'>${escHtml(data.detail || "Failed")}</p>`;
+        return;
+      }
+      const domains = data.domains || [];
+      let html = "";
+      for (const d of domains) {
+        html += `<div style="display:flex;align-items:center;justify-content:space-between;
+                             padding:.4rem 0;border-bottom:1px solid var(--border);font-size:13px;">
+          <span style="font-family:monospace;">${escHtml(d)}</span>
+          <button class="btn btn-danger" style="padding:.15rem .4rem;font-size:11px;"
+                  onclick="removeDomain('${escHtml(d)}')">✕</button>
+        </div>`;
+      }
+      if (!domains.length) html = "<p style='color:var(--text-muted);font-size:13px;'>No custom domains yet.</p>";
+      html += `<div style="display:flex;gap:.5rem;margin-top:1rem;flex-wrap:wrap;">
+        <input id="domain-input" type="text" placeholder="example.com"
+               style="padding:.35rem .6rem;font-size:13px;border:1px solid var(--border);
+                      border-radius:4px;background:var(--surface);color:var(--text);flex:1;min-width:180px;">
+        <button class="btn btn-primary" style="font-size:13px;" onclick="addDomain()">Add Domain</button>
+      </div>
+      <div id="domain-msg" style="margin-top:.5rem;font-size:13px;"></div>`;
+      body.innerHTML = html;
+    } catch {
+      body.innerHTML = "<p style='color:var(--danger)'>Network error.</p>";
+    }
+  }
+
+  async function addDomain() {
+    const input = document.getElementById("domain-input");
+    const msg = document.getElementById("domain-msg");
+    const domain = (input?.value || "").trim();
+    if (!domain) { if (msg) msg.innerHTML = '<span style="color:var(--danger)">Enter a domain name.</span>'; return; }
+    try {
+      const resp = await fetch("/api/deployments/" + _domainsDepId + "/domains", {
+        method: "POST",
+        headers: {"Content-Type": "application/json"},
+        body: JSON.stringify({domain}),
+      });
+      if (!resp.ok) {
+        const data = await resp.json();
+        if (msg) msg.innerHTML = `<span style="color:var(--danger)">${escHtml(data.detail || "Failed")}</span>`;
+      } else {
+        await refreshDomains();
+      }
+    } catch {
+      if (msg) msg.innerHTML = '<span style="color:var(--danger)">Network error.</span>';
+    }
+  }
+
+  async function removeDomain(domain) {
+    if (!confirm(`Remove domain "${domain}"?`)) return;
+    try {
+      const resp = await fetch("/api/deployments/" + _domainsDepId + "/domains/" + encodeURIComponent(domain), {
+        method: "DELETE",
+      });
+      if (resp.ok) await refreshDomains();
+    } catch { /* silently ignore */ }
+  }
+
+  function closeDomainsModal() {
+    document.getElementById("domains-modal").style.display = "none";
+    _domainsDepId = null;
+  }
+
+  // --- History modal ---
+
+  async function showHistory(id, name) {
+    const modal = document.getElementById("history-modal");
+    const body = document.getElementById("history-modal-body");
+    document.getElementById("history-modal-title").textContent = `Deploy History — ${name}`;
+    body.innerHTML = "<p style='color:var(--text-muted)'>Loading…</p>";
+    modal.style.display = "flex";
+    try {
+      const resp = await fetch("/api/deployments/" + id + "/history");
+      const events = await resp.json();
+      if (!resp.ok) {
+        body.innerHTML = `<p style='color:var(--danger)'>${escHtml(events.detail || "Failed")}</p>`;
+        return;
+      }
+      if (!events.length) {
+        body.innerHTML = "<p style='color:var(--text-muted);font-size:13px;'>No deploy events recorded yet.</p>";
+        return;
+      }
+      let html = "";
+      for (const ev of events) {
+        html += `<div style="display:flex;align-items:flex-start;gap:.75rem;padding:.5rem 0;
+                             border-bottom:1px solid var(--border);">
+          <span class="${badgeClass(ev.status)}" style="flex-shrink:0;">${escHtml(ev.status)}</span>
+          <div style="font-size:13px;">
+            <div>${formatDate(ev.triggered_at)}</div>
+            ${ev.platform_event_id ? `<div style="font-size:11px;color:var(--text-muted);font-family:monospace;">${escHtml(ev.platform_event_id)}</div>` : ""}
+          </div>
+        </div>`;
+      }
+      body.innerHTML = html;
+    } catch {
+      body.innerHTML = "<p style='color:var(--danger)'>Network error.</p>";
+    }
+  }
+
+  function closeHistoryModal() {
+    document.getElementById("history-modal").style.display = "none";
+  }
+
+  let _buildModalDepId = null;
+
+  async function showBuildConfig(id, name) {
+    _buildModalDepId = id;
+    document.getElementById("build-modal-title").textContent = `Build Config — ${name}`;
+    document.getElementById("build-modal-body").innerHTML =
+      "<p style='color:var(--text-muted);font-size:13px;'>Loading…</p>";
+    document.getElementById("build-modal").style.display = "flex";
+    await refreshBuildConfig();
+  }
+
+  function closeBuildModal() {
+    document.getElementById("build-modal").style.display = "none";
+    _buildModalDepId = null;
+  }
+
+  async function refreshBuildConfig() {
+    const body = document.getElementById("build-modal-body");
+    try {
+      const resp = await fetch(`/api/deployments/${_buildModalDepId}/build`);
+      const data = await resp.json();
+      if (!resp.ok) {
+        body.innerHTML = `<p style='color:var(--danger);font-size:13px;'>${escHtml(data.detail || "Failed")}</p>`;
+        return;
+      }
+      const cmd = data.build_command || "";
+      const headers = data.headers || [];
+      const hasCors = headers.length > 0;
+
+      let html = `<p style="font-size:13px;color:var(--text-muted);margin:0 0 .75rem;">
+        Render ignores <code>render.yaml</code> for API-created services.
+        Set build command and CORS headers here, then redeploy to activate.
+      </p>`;
+
+      // Current config table
+      const hasAnything = cmd || hasCors;
+      html += `<table style="width:100%;border-collapse:collapse;font-size:13px;margin-bottom:.75rem;">
+        <thead><tr>
+          <th style="text-align:left;padding:.3rem .5rem;border-bottom:1px solid var(--border);color:var(--text-muted);font-weight:500;">Setting</th>
+          <th style="text-align:left;padding:.3rem .5rem;border-bottom:1px solid var(--border);color:var(--text-muted);font-weight:500;">Value</th>
+          <th style="padding:.3rem;border-bottom:1px solid var(--border);"></th>
+        </tr></thead><tbody>`;
+      if (cmd) {
+        html += `<tr>
+          <td style="padding:.35rem .5rem;">Build Command</td>
+          <td style="padding:.35rem .5rem;font-family:monospace;">${escHtml(cmd)}</td>
+          <td style="padding:.35rem;">
+            <button class="btn btn-danger" style="padding:.15rem .4rem;font-size:11px;"
+                    onclick="clearBuildItem('command')">✕</button>
+          </td>
+        </tr>`;
+      }
+      if (hasCors) {
+        html += `<tr>
+          <td style="padding:.35rem .5rem;">CORS Headers</td>
+          <td style="padding:.35rem .5rem;color:var(--text-muted);">Access-Control-Allow-Origin: *</td>
+          <td style="padding:.35rem;">
+            <button class="btn btn-danger" style="padding:.15rem .4rem;font-size:11px;"
+                    onclick="clearBuildItem('cors')">✕</button>
+          </td>
+        </tr>`;
+      }
+      if (!hasAnything) {
+        html += `<tr><td colspan="3" style="padding:.5rem;color:var(--text-muted);font-size:13px;">No build config set.</td></tr>`;
+      }
+      html += `</tbody></table>`;
+
+      // Update form
+      html += `<div style="border-top:1px solid var(--border);padding-top:.75rem;display:flex;flex-direction:column;gap:.5rem;">
+        <label style="font-size:13px;font-weight:600;">Update Build Command</label>
+        <input id="build-cmd-input" type="text" placeholder="bash build.sh" value="${escHtml(cmd)}"
+               style="border:1px solid var(--border);border-radius:6px;padding:.4rem .65rem;
+                      font-size:13px;font-family:monospace;background:var(--surface);color:var(--text);">
+        <label style="display:flex;align-items:center;gap:.5rem;font-size:13px;cursor:pointer;">
+          <input id="build-cors-checkbox" type="checkbox" ${hasCors ? "checked" : ""}>
+          Apply CORS headers <span style="color:var(--text-muted);">(Access-Control-Allow-Origin: *)</span>
+        </label>
+        <div style="display:flex;gap:.5rem;align-items:center;margin-top:.25rem;">
+          <button class="btn btn-secondary" onclick="closeBuildModal()" style="font-size:13px;">Cancel</button>
+          <button class="btn" onclick="saveBuildConfig()" style="font-size:13px;">Apply Settings</button>
+          <span id="build-modal-msg" style="font-size:13px;color:var(--text-muted);"></span>
+        </div>
+      </div>`;
+
+      body.innerHTML = html;
+      document.getElementById("build-cmd-input").focus();
+    } catch {
+      body.innerHTML = "<p style='color:var(--danger);font-size:13px;'>Network error.</p>";
+    }
+  }
+
+  async function clearBuildItem(item) {
+    const body = document.getElementById("build-modal-body");
+    // Fetch current state so we can keep the other setting intact
+    let cmd = "", hasCors = false;
+    try {
+      const r = await fetch(`/api/deployments/${_buildModalDepId}/build`);
+      const d = await r.json();
+      cmd = d.build_command || "";
+      hasCors = (d.headers || []).length > 0;
+    } catch { return; }
+    const patch = item === "command"
+      ? {build_command: "", apply_cors: hasCors}
+      : {build_command: cmd, apply_cors: false};
+    await fetch(`/api/deployments/${_buildModalDepId}/build`, {
+      method: "PATCH",
+      headers: {"Content-Type": "application/json"},
+      body: JSON.stringify(patch),
+    });
+    await refreshBuildConfig();
+  }
+
+  async function saveBuildConfig() {
+    if (!_buildModalDepId) return;
+    const build_command = (document.getElementById("build-cmd-input")?.value || "").trim();
+    const apply_cors = document.getElementById("build-cors-checkbox")?.checked ?? false;
+    const msg = document.getElementById("build-modal-msg");
+    if (msg) msg.textContent = "Applying…";
+    try {
+      const resp = await fetch(`/api/deployments/${_buildModalDepId}/build`, {
+        method: "PATCH",
+        headers: {"Content-Type": "application/json"},
+        body: JSON.stringify({build_command, apply_cors}),
+      });
+      const data = await resp.json();
+      if (!resp.ok) {
+        if (msg) { msg.style.color = "var(--danger)"; msg.textContent = data.detail || "Failed"; }
+      } else {
+        await refreshBuildConfig();
+      }
+    } catch {
+      if (msg) { msg.style.color = "var(--danger)"; msg.textContent = "Network error"; }
+    }
+  }
 
   loadAll();
 </script>

@@ -50,6 +50,23 @@ class Project(Base):  # pylint: disable=too-few-public-methods
     )
 
 
+class DeploymentEvent(Base):  # pylint: disable=too-few-public-methods
+    """A single deployment event (build trigger) in the history of a project."""
+
+    __tablename__ = "deployment_events"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    deployment_id: Mapped[int] = mapped_column(
+        ForeignKey("deployments.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    platform_event_id: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)
+    status: Mapped[str] = mapped_column(String(50), default="triggered")
+    triggered_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        default=lambda: datetime.now(timezone.utc),
+    )
+
+
 class Deployment(Base):  # pylint: disable=too-few-public-methods
     """Record of a deployment created via a platform API."""
 

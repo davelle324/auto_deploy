@@ -100,3 +100,58 @@ class BasePlatformClient(ABC):
         """
         _ = project_name
         return None
+
+    async def get_deployment_logs(
+        self, platform_deployment_id: str, project_name: str
+    ) -> list[str]:
+        """Return recent build log lines for a deployment.
+
+        Returns an empty list if the platform client does not support log fetching.
+        """
+        _ = platform_deployment_id, project_name
+        return []
+
+    async def list_env_vars(
+        self, platform_deployment_id: str, project_name: str
+    ) -> list[dict]:
+        """Return env vars for a deployment as [{key, value}] dicts.
+
+        Returns an empty list if the platform does not support env var management.
+        """
+        _ = platform_deployment_id, project_name
+        return []
+
+    async def set_env_vars(
+        self, platform_deployment_id: str, project_name: str, env_vars: list[dict]
+    ) -> None:
+        """Upsert env vars for a deployment. Each dict must have 'key' and 'value'."""
+        _ = platform_deployment_id, project_name, env_vars
+        raise ValueError("Env var management is not supported for this platform.")
+
+    async def delete_env_var(
+        self, platform_deployment_id: str, project_name: str, key: str
+    ) -> None:
+        """Delete a single env var by key."""
+        _ = platform_deployment_id, project_name, key
+        raise ValueError("Env var management is not supported for this platform.")
+
+    async def list_domains(
+        self, platform_deployment_id: str, project_name: str
+    ) -> list[str]:
+        """Return custom domains attached to a deployment."""
+        _ = platform_deployment_id, project_name
+        return []
+
+    async def add_domain(
+        self, platform_deployment_id: str, project_name: str, domain: str
+    ) -> None:
+        """Add a custom domain to a deployment."""
+        _ = platform_deployment_id, project_name, domain
+        raise ValueError("Domain management is not supported for this platform.")
+
+    async def remove_domain(
+        self, platform_deployment_id: str, project_name: str, domain: str
+    ) -> None:
+        """Remove a custom domain from a deployment."""
+        _ = platform_deployment_id, project_name, domain
+        raise ValueError("Domain management is not supported for this platform.")

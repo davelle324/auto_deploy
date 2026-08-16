@@ -10,7 +10,7 @@ from fastapi.templating import Jinja2Templates
 
 from config import settings
 from database import init_db
-from routers import deployments, projects, tokens
+from routers import deployments, domains, env_vars, projects, tokens, webhooks
 
 
 @asynccontextmanager
@@ -35,6 +35,9 @@ templates = Jinja2Templates(directory="templates")
 app.include_router(tokens.router)
 app.include_router(deployments.router)
 app.include_router(projects.router)
+app.include_router(env_vars.router)
+app.include_router(domains.router)
+app.include_router(webhooks.router)
 
 
 @app.get("/", response_class=HTMLResponse)

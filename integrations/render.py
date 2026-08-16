@@ -170,6 +170,56 @@ class RenderClient(BasePlatformClient):
             "Delete this deployment and create a new one with a repo URL."
         )
 
+    async def get_build_config(
+        self, platform_deployment_id: str, project_name: str
+    ) -> dict:
+        """Return the current build command and response headers for a Render service."""
+        async with httpx.AsyncClient() as client:
+            resp = await client.get(
+                f"{RENDER_API}/services/{platform_deployment_id}",
+                headers=self._headers,
+            )
+            if resp.status_code != 200:
+                return {"build_command": "", "headers": []}
+            service = resp.json().get("service", {})
+            details = service.get("serviceDetails", {})
+            return {
+                "build_command": details.get("buildCommand", "") or "",
+                "headers": details.get("headers", []),
+            }
+
+    async def update_build_command(
+        self,
+        platform_deployment_id: str,
+        project_name: str,
+        build_command: str,
+        apply_cors: bool = True,
+    ) -> None:
+        """PATCH the Render service to set build command and optionally CORS headers.
+
+        Render ignores render.yaml for API-created services; settings must be
+        applied explicitly via PATCH.  apply_cors=True adds permissive CORS
+        response headers so the site is reachable from other origins (e.g.
+        testing from a Vercel-hosted page).
+        """
+        service_details: dict = {
+            "buildCommand": build_command,
+            "headers": [
+                {"path": "/*", "name": "Access-Control-Allow-Origin", "value": "*"},
+                {"path": "/*", "name": "Access-Control-Allow-Methods", "value": "GET, HEAD, OPTIONS"},
+                {"path": "/*", "name": "Access-Control-Allow-Headers", "value": "*"},
+            ] if apply_cors else [],
+        }
+        payload = {"serviceDetails": service_details}
+        async with httpx.AsyncClient() as client:
+            resp = await client.patch(
+                f"{RENDER_API}/services/{platform_deployment_id}",
+                headers=self._headers,
+                json=payload,
+            )
+            if resp.status_code not in (200, 201):
+                resp.raise_for_status()
+
     async def delete_deployment(
         self, platform_deployment_id: str, project_name: str
     ) -> None:
@@ -192,3 +242,120 @@ class RenderClient(BasePlatformClient):
             service = resp.json().get("service", {})
             suspended = service.get("suspended", "not_suspended")
             return "suspended" if suspended == "suspended" else "ready"
+
+    async def get_deployment_logs(
+        self, platform_deployment_id: str, project_name: str
+    ) -> list[str]:
+        """Fetch recent log lines for a Render service."""
+        async with httpx.AsyncClient() as client:
+            logs_resp = await client.get(
+                f"{RENDER_API}/services/{platform_deployment_id}/logs",
+                headers=self._headers,
+                params={"limit": 100, "direction": "backward"},
+            )
+            if logs_resp.status_code != 200:
+                return []
+            entries = logs_resp.json()
+            if not isinstance(entries, list):
+                return []
+            result = []
+            for e in entries:
+                # Render wraps each entry: {"cursor": "...", "log": {"message": "..."}}
+                log_obj = e.get("log", e)
+                msg = log_obj.get("message", log_obj.get("text", ""))
+                if msg:
+                    result.append(msg)
+            return result
+
+    async def list_env_vars(
+        self, platform_deployment_id: str, project_name: str
+    ) -> list[dict]:
+        """Return env vars for a Render service as [{key, value}] dicts."""
+        async with httpx.AsyncClient() as client:
+            resp = await client.get(
+                f"{RENDER_API}/services/{platform_deployment_id}/env-vars",
+                headers=self._headers,
+            )
+            if resp.status_code != 200:
+                return []
+            result = []
+            for e in resp.json():
+                # Render wraps each item: {"cursor": "...", "envVar": {"key": ..., "value": ...}}
+                env_obj = e.get("envVar", e)
+                key = env_obj.get("key", "")
+                if key:
+                    result.append({"key": key, "value": env_obj.get("value", "")})
+            return result
+
+    async def set_env_vars(
+        self, platform_deployment_id: str, project_name: str, env_vars: list[dict]
+    ) -> None:
+        """Overwrite all env vars on a Render service."""
+        async with httpx.AsyncClient() as client:
+            existing = await self.list_env_vars(platform_deployment_id, project_name)
+            merged = {e["key"]: e["value"] for e in existing}
+            for ev in env_vars:
+                merged[ev["key"]] = ev["value"]
+            resp = await client.put(
+                f"{RENDER_API}/services/{platform_deployment_id}/env-vars",
+                headers=self._headers,
+                json=[{"key": k, "value": v} for k, v in merged.items()],
+            )
+            if resp.status_code not in (200, 201):
+                resp.raise_for_status()
+
+    async def delete_env_var(
+        self, platform_deployment_id: str, project_name: str, key: str
+    ) -> None:
+        """Remove an env var from a Render service by re-PUTting without it."""
+        existing = await self.list_env_vars(platform_deployment_id, project_name)
+        remaining = [e for e in existing if e["key"] != key]
+        async with httpx.AsyncClient() as client:
+            resp = await client.put(
+                f"{RENDER_API}/services/{platform_deployment_id}/env-vars",
+                headers=self._headers,
+                json=remaining,
+            )
+            if resp.status_code not in (200, 201):
+                resp.raise_for_status()
+
+    async def list_domains(
+        self, platform_deployment_id: str, project_name: str
+    ) -> list[str]:
+        """Return custom domains for a Render service."""
+        async with httpx.AsyncClient() as client:
+            resp = await client.get(
+                f"{RENDER_API}/services/{platform_deployment_id}/custom-domains",
+                headers=self._headers,
+            )
+            if resp.status_code != 200:
+                return []
+            return [
+                d.get("customDomain", {}).get("name", d.get("name", ""))
+                for d in resp.json()
+                if isinstance(d, dict)
+            ]
+
+    async def add_domain(
+        self, platform_deployment_id: str, project_name: str, domain: str
+    ) -> None:
+        """Add a custom domain to a Render service."""
+        async with httpx.AsyncClient() as client:
+            resp = await client.post(
+                f"{RENDER_API}/services/{platform_deployment_id}/custom-domains",
+                headers=self._headers,
+                json={"name": domain},
+            )
+            resp.raise_for_status()
+
+    async def remove_domain(
+        self, platform_deployment_id: str, project_name: str, domain: str
+    ) -> None:
+        """Remove a custom domain from a Render service."""
+        async with httpx.AsyncClient() as client:
+            resp = await client.delete(
+                f"{RENDER_API}/services/{platform_deployment_id}/custom-domains/{domain}",
+                headers=self._headers,
+            )
+            if resp.status_code not in (200, 204, 404):
+                resp.raise_for_status()
