@@ -12,38 +12,46 @@ A self-hosted web dashboard for deploying and managing websites across Vercel, N
 - **Sync status** from the platform API on demand
 - **Bulk sync** all deployments at once with the "↻ Sync All" button
 - **Delete** a project on the platform, or **remove from tracking** without touching the platform
+- **Type tagging** — mark each deployment as `static` or `backend`; auto-detected on import
 
 ### Observability
 - **Build logs** — view recent build output for any deployment in a modal
 - **Deploy history** — timeline of every triggered deployment with status and timestamp
+- **Last deployed** — relative timestamp ("2h ago") on every card with hover for the full date
+- **Ping / uptime** — HTTP-check any deployment URL and see response time; ping an entire project at once
 - **Live status polling** — in-progress builds auto-refresh every 5 seconds
+- **Browser notifications** — get a notification when a deployment finishes or fails (requires permission)
 
 ### Configuration
 - **Environment variables** — list, add, update, and delete env vars on any deployment
 - **Custom domains** — list, add, and remove custom domains per deployment
 - **Build Config (Render)** — set build command and CORS headers on Render static sites via the 🔧 Build Config button (Render ignores `render.yaml` for API-created services; this applies settings directly via `PATCH /services/{id}`)
+- **Notes** — attach personal notes to any deployment; saved on blur
 
 ### Dashboard
 - **Search** — filter deployments by name, status, platform, URL, or repo
-- **Platform filter** — multi-select dropdown to show only Vercel / Netlify / Render
-- **Project groups** — organise deployments into collapsible project sections
+- **Filters & Sort** — collapsible panel with platform checkboxes, project/type selectors, and sort options (name, status, newest, oldest, last deployed)
+- **Project groups** — organise deployments into collapsible project sections with per-project sync/deploy/ping buttons
+- **Unassigned section** — unassigned deployments shown as a collapsible section with the same bulk actions as projects
 - **Dark mode** — system-aware, manually toggleable
-- **Stats widgets** — total deployments and live count at a glance
+- **Stats widgets** — total deployments, live count, and failing count at a glance
 
 ### Automation
 - **Webhooks** — receive build status events from all three platforms at `/api/webhook/{platform}` to auto-update deployment status without polling
 - **HMAC verification** — webhook signatures validated when `WEBHOOK_SECRET` is set
+- **Auto-refresh** — optional 60-second background refresh toggle on the dashboard
 
 ### Security
 - Encrypted token storage (Fernet + SHA-256 key derivation)
 - Tokens never returned in API responses
+- Optional single-password login (`APP_PASSWORD`) with session cookies
 
 ## Installation
 
 ```bash
 git clone <repo-url>
 cd auto_deploy
-pip install -r requirements.txt
+pip install -e ".[dev]"
 cp .env.example .env
 # Edit .env and set SECRET_KEY to a random string
 ```
@@ -119,6 +127,9 @@ The full OpenAPI spec is at `/docs` (Swagger UI) and `/redoc`.
 | `/api/deployments/{id}/redeploy` | `POST` | Trigger a new deployment |
 | `/api/deployments/{id}/repo` | `PATCH` | Connect a GitHub repo |
 | `/api/deployments/{id}/project` | `PATCH` | Assign to an internal project group |
+| `/api/deployments/{id}/type` | `PATCH` | Set deployment type (`static` / `backend`) |
+| `/api/deployments/{id}/notes` | `PATCH` | Update personal notes |
+| `/api/deployments/{id}/ping` | `GET` | HTTP-check the deployment URL |
 | `/api/deployments/{id}/logs` | `GET` | Fetch build log lines |
 | `/api/deployments/{id}/history` | `GET` | List deploy events (most recent first) |
 | `/api/deployments/{id}/build` | `PATCH` | Set build command + CORS headers (Render only) |
@@ -206,6 +217,15 @@ Use the same region code you passed to `fly launch` (e.g. `ewr`). The `-n 1` fla
   destination = "/app/data"
 ```
 
+Also ensure the `[[vm]]` section has `count = 1` to prevent Fly from spinning up multiple machines (SQLite only works on a single machine):
+```toml
+[[vm]]
+  memory = '1gb'
+  cpu_kind = 'shared'
+  cpus = 1
+  count = 1
+```
+
 **6. Set secrets** (these are your environment variables on Fly.io — never commit these)
 ```bash
 fly secrets set SECRET_KEY=$(python -c "import secrets; print(secrets.token_hex(32))")
@@ -232,6 +252,27 @@ fly deploy
 ```
 
 That's it — Fly.io builds and restarts the app automatically. Your database and data are preserved on the persistent volume.
+
+### Verifying data persists
+
+After entering your API tokens, confirm they're actually stored on the volume:
+```bash
+fly ssh console
+ls -lh /app/data/auto_deploy.db
+# Should show a file larger than 4k once tokens are saved
+```
+
+A 4k database is empty (just the schema). If the file stays at 4k after saving tokens, `DATABASE_URL` is not pointing to the volume path — double-check `fly secrets list`.
+
+### Avoiding the two-volume problem
+
+Fly.io may create a second machine during a deploy, giving each machine its own separate database. Prevent this by keeping `count = 1` in `fly.toml` (shown in step 5 above). If you already have two volumes, fix it:
+```bash
+fly volume list          # identify the second volume
+fly scale count 1        # reduce to one machine
+fly volumes destroy <id> # remove the extra empty volume
+fly deploy
+```
 
 ### Stopping or pausing the app
 
@@ -268,8 +309,6 @@ Fly.io will give you a DNS record to add at your registrar and handles the SSL c
 
 `fly deploy` builds and ships whatever is currently saved on your local machine — GitHub is not involved. Your computer just needs to be on long enough to run the command. Once deployed, the app runs on Fly.io's servers 24/7 regardless of whether your computer is on.
 
-If you want deploys to trigger automatically on every GitHub push, you can add a GitHub Actions workflow for that, but it's optional.
-
 ### Useful commands
 
 ```bash
@@ -279,6 +318,7 @@ fly status        # check if the app is running
 fly ssh console   # open a shell inside the running container
 fly open          # open the app URL in your browser
 fly secrets list  # see which secrets are set (values are hidden)
+fly volume list   # confirm one volume is attached to one machine
 ```
 
 ## Running Tests
@@ -286,6 +326,8 @@ fly secrets list  # see which secrets are set (values are hidden)
 ```bash
 python -m pytest tests/ -v
 ```
+
+Tests run automatically on every push via GitHub Actions (see `.github/workflows/test.yml`). The deploy workflow only runs if tests pass.
 
 ## Notes on Free Tiers
 
@@ -297,6 +339,7 @@ python -m pytest tests/ -v
 ## Platform-Specific Notes
 
 - **Vercel git deployments** require the [Vercel GitHub App](https://vercel.com/docs/deployments/git/vercel-for-github) to be installed and granted access to the repo
+- **Netlify deployments via API** require the [Netlify GitHub App](https://docs.netlify.com/configure-builds/repo-permissions-linking/) to be installed on the repo before git-triggered builds will work
 - **Netlify env vars** — the API shape differs between personal and team accounts; listing may return a dict or array depending on account type
 - **Render logs** — fetched from `/services/{id}/logs`; may be empty if no deploy has run yet
 - **Render `render.yaml`** — ignored for services created via the API. Use the 🔧 Build Config modal to apply build commands and CORS headers programmatically; redeploy after applying to activate changes
