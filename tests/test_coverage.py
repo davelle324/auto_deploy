@@ -1,4 +1,4 @@
-# pylint: disable=missing-module-docstring,missing-function-docstring,invalid-name,redefined-outer-name,line-too-long,unused-argument,too-many-lines
+# pylint: disable=missing-module-docstring,missing-function-docstring,invalid-name,redefined-outer-name,line-too-long,unused-argument,too-many-lines,protected-access,import-outside-toplevel,reimported
 """Additional tests to reach 100% coverage on all newly-added code paths."""
 
 import hashlib
@@ -1588,3 +1588,146 @@ async def test_vercel_connect_repo_400_error_raises_value_error():
     with patch("integrations.vercel.httpx.AsyncClient", return_value=mock_client):
         with pytest.raises(ValueError, match="Vercel GitHub App"):
             await VercelClient("tok").connect_repo("pid", "proj", "https://github.com/o/r")
+
+
+# =============================================================================
+# integrations/render.py:94 — create_deployment fallback when service has no id
+# =============================================================================
+
+@pytest.mark.asyncio
+async def test_render_create_deployment_no_service_id_returns_failed():
+    owners_resp = _mock_response([{"owner": {"id": "own_123"}}])
+    create_resp = _mock_response({"service": {}}, status_code=201)
+    mock_client = _make_async_client(get=owners_resp, post=[create_resp])
+    with patch("integrations.render.httpx.AsyncClient", return_value=mock_client):
+        result = await RenderClient("tok").create_deployment("proj", repo_url="https://github.com/o/r")
+    assert result.platform_deployment_id == "unknown"
+    assert result.status == "failed"
+
+
+# =============================================================================
+# routers/deployments.py — set_deployment_type (lines 442-451)
+# =============================================================================
+
+@pytest.mark.asyncio
+async def test_set_deployment_type_success(client):
+    dep_id = await _seed(client)
+    resp = await client.patch(f"/api/deployments/{dep_id}/type", json={"deployment_type": "backend"})
+    assert resp.status_code == 200
+    assert resp.json()["deployment_type"] == "backend"
+
+
+@pytest.mark.asyncio
+async def test_set_deployment_type_clears_to_none(client):
+    dep_id = await _seed(client)
+    await client.patch(f"/api/deployments/{dep_id}/type", json={"deployment_type": "static"})
+    resp = await client.patch(f"/api/deployments/{dep_id}/type", json={"deployment_type": None})
+    assert resp.status_code == 200
+    assert resp.json()["deployment_type"] is None
+
+
+@pytest.mark.asyncio
+async def test_set_deployment_type_not_found(client):
+    resp = await client.patch("/api/deployments/9999/type", json={"deployment_type": "static"})
+    assert resp.status_code == 404
+
+
+# =============================================================================
+# routers/deployments.py — set_deployment_notes (lines 459-468)
+# =============================================================================
+
+@pytest.mark.asyncio
+async def test_set_deployment_notes_success(client):
+    dep_id = await _seed(client)
+    resp = await client.patch(f"/api/deployments/{dep_id}/notes", json={"notes": "my note"})
+    assert resp.status_code == 200
+    assert resp.json()["notes"] == "my note"
+
+
+@pytest.mark.asyncio
+async def test_set_deployment_notes_clears_to_none(client):
+    dep_id = await _seed(client)
+    await client.patch(f"/api/deployments/{dep_id}/notes", json={"notes": "first"})
+    resp = await client.patch(f"/api/deployments/{dep_id}/notes", json={"notes": None})
+    assert resp.status_code == 200
+    assert resp.json()["notes"] is None
+
+
+@pytest.mark.asyncio
+async def test_set_deployment_notes_not_found(client):
+    resp = await client.patch("/api/deployments/9999/notes", json={"notes": "x"})
+    assert resp.status_code == 404
+
+
+# =============================================================================
+# routers/deployments.py — ping_deployment (lines 474-488)
+# =============================================================================
+
+@pytest.mark.asyncio
+async def test_ping_deployment_not_found(client):
+    resp = await client.get("/api/deployments/9999/ping")
+    assert resp.status_code == 404
+
+
+@pytest.mark.asyncio
+async def test_ping_deployment_no_url(client):
+    await client.post("/api/tokens/", json={"platform": "vercel", "token": "tok"})
+    with patch("routers.deployments.VercelClient") as MC:
+        MC.return_value.create_deployment = AsyncMock(return_value=DeployResult(
+            platform_deployment_id="dpl_abc", url=None, status="ready", project_name="nourl",
+        ))
+        r = await client.post("/api/deployments/", json={"platform": "vercel", "project_name": "nourl"})
+    dep_id = r.json()["id"]
+    resp = await client.get(f"/api/deployments/{dep_id}/ping")
+    assert resp.status_code == 200
+    data = resp.json()
+    assert data["up"] is None
+    assert data["reason"] == "no_url"
+
+
+@pytest.mark.asyncio
+async def test_ping_deployment_up(client):
+    dep_id = await _seed(client)
+    mock_response = MagicMock()
+    mock_response.status_code = 200
+    mock_http = AsyncMock()
+    mock_http.__aenter__ = AsyncMock(return_value=mock_http)
+    mock_http.__aexit__ = AsyncMock(return_value=False)
+    mock_http.get = AsyncMock(return_value=mock_response)
+    with patch("routers.deployments.httpx.AsyncClient", return_value=mock_http):
+        resp = await client.get(f"/api/deployments/{dep_id}/ping")
+    assert resp.status_code == 200
+    data = resp.json()
+    assert data["up"] is True
+    assert data["status_code"] == 200
+    assert data["reason"] is None
+
+
+@pytest.mark.asyncio
+async def test_ping_deployment_server_error_is_down(client):
+    dep_id = await _seed(client)
+    mock_response = MagicMock()
+    mock_response.status_code = 503
+    mock_http = AsyncMock()
+    mock_http.__aenter__ = AsyncMock(return_value=mock_http)
+    mock_http.__aexit__ = AsyncMock(return_value=False)
+    mock_http.get = AsyncMock(return_value=mock_response)
+    with patch("routers.deployments.httpx.AsyncClient", return_value=mock_http):
+        resp = await client.get(f"/api/deployments/{dep_id}/ping")
+    assert resp.status_code == 200
+    assert resp.json()["up"] is False
+
+
+@pytest.mark.asyncio
+async def test_ping_deployment_unreachable(client):
+    dep_id = await _seed(client)
+    mock_http = AsyncMock()
+    mock_http.__aenter__ = AsyncMock(return_value=mock_http)
+    mock_http.__aexit__ = AsyncMock(return_value=False)
+    mock_http.get = AsyncMock(side_effect=Exception("connection refused"))
+    with patch("routers.deployments.httpx.AsyncClient", return_value=mock_http):
+        resp = await client.get(f"/api/deployments/{dep_id}/ping")
+    assert resp.status_code == 200
+    data = resp.json()
+    assert data["up"] is False
+    assert data["reason"] == "unreachable"

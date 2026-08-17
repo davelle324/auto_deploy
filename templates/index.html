@@ -32,57 +32,82 @@
 </div>
 
 <!-- Filters -->
-<div id="filter-bar" style="margin:.5rem 0 1rem;display:flex;gap:.75rem;align-items:center;flex-wrap:wrap;">
-  <div style="position:relative;display:inline-block;" id="platform-dd-wrap">
-    <button class="btn btn-secondary" id="platform-filter-btn" onclick="togglePlatformDropdown()"
-            style="font-size:13px;min-width:140px;display:flex;align-items:center;justify-content:space-between;gap:.4rem;">
-      <span id="platform-label">All Platforms</span><span style="font-size:10px;">▾</span>
-    </button>
-    <div id="platform-filter-options" style="display:none;position:absolute;top:calc(100% + 4px);left:0;z-index:200;
-         background:var(--surface);border:1px solid var(--border);border-radius:6px;
-         padding:.4rem .6rem;min-width:150px;box-shadow:0 2px 8px rgba(0,0,0,.12);">
-      <label style="display:flex;align-items:center;gap:.4rem;padding:.25rem 0;font-size:13px;cursor:pointer;">
-        <input type="checkbox" id="platform-cb-all" onchange="platformCbAll(this)" checked> All
-      </label>
-      <label style="display:flex;align-items:center;gap:.4rem;padding:.25rem 0;font-size:13px;cursor:pointer;">
-        <input type="checkbox" class="platform-cb" value="vercel" onchange="updatePlatformFilter()"> Vercel
-      </label>
-      <label style="display:flex;align-items:center;gap:.4rem;padding:.25rem 0;font-size:13px;cursor:pointer;">
-        <input type="checkbox" class="platform-cb" value="netlify" onchange="updatePlatformFilter()"> Netlify
-      </label>
-      <label style="display:flex;align-items:center;gap:.4rem;padding:.25rem 0;font-size:13px;cursor:pointer;">
-        <input type="checkbox" class="platform-cb" value="render" onchange="updatePlatformFilter()"> Render
-      </label>
-    </div>
-  </div>
-
-  <select id="project-filter-select" style="font-size:13px;padding:.35rem .6rem;
-         border:1px solid var(--border);border-radius:4px;background:var(--surface);
-         color:var(--text);cursor:pointer;" onchange="setProjectFilter(this.value)">
-    <option value="">All Projects</option>
-    <option value="unassigned">Unassigned only</option>
-  </select>
-
-  <select id="type-filter-select" style="font-size:13px;padding:.35rem .6rem;
-         border:1px solid var(--border);border-radius:4px;background:var(--surface);
-         color:var(--text);cursor:pointer;" onchange="setTypeFilter(this.value)">
-    <option value="">All Types</option>
-    <option value="static">Static</option>
-    <option value="backend">Backend</option>
-  </select>
-
+<!-- Toolbar: search + filter toggle + action icons -->
+<div style="margin:.5rem 0 .4rem;display:flex;gap:.4rem;align-items:center;">
   <input id="search-input" type="search" placeholder="Search deployments…"
          style="font-size:13px;padding:.35rem .6rem;border:1px solid var(--border);
-                border-radius:4px;background:var(--surface);color:var(--text);
-                min-width:200px;"
+                border-radius:4px;background:var(--surface);color:var(--text);flex:1;"
          oninput="setSearch(this.value)">
+  <button class="btn btn-secondary" id="filter-toggle-btn" onclick="toggleFilterPanel()"
+          style="font-size:13px;padding:.35rem .65rem;display:flex;align-items:center;gap:.35rem;white-space:nowrap;">
+    <span>⚙ Filters &amp; Sort</span><span id="filter-toggle-icon" style="font-size:10px;">▾</span>
+  </button>
+  <button class="btn btn-secondary" style="padding:.35rem .5rem;font-size:13px;" title="Collapse all projects" onclick="collapseAllProjects()">⊟</button>
+  <button class="btn btn-secondary" style="padding:.35rem .5rem;font-size:13px;" title="Expand all projects" onclick="expandAllProjects()">⊞</button>
+  <button class="btn btn-secondary" id="failing-filter-btn" style="padding:.35rem .5rem;font-size:13px;" title="Show failing only" onclick="toggleFailingFilter()">⚠</button>
+  <button class="btn btn-secondary" id="auto-refresh-btn" style="padding:.35rem .5rem;font-size:13px;" title="Auto-refresh: off" onclick="toggleAutoRefresh()">⏱</button>
+  <button class="btn btn-secondary" style="padding:.35rem .5rem;font-size:13px;" title="Ping all sites" onclick="pingAll()">⬤</button>
 </div>
 
-<div style="display:flex;gap:.5rem;flex-wrap:wrap;margin-bottom:.75rem;align-items:center;">
-  <button class="btn btn-secondary" style="font-size:12px;" onclick="collapseAllProjects()">⊟ Collapse all</button>
-  <button class="btn btn-secondary" style="font-size:12px;" onclick="expandAllProjects()">⊞ Expand all</button>
-  <button class="btn btn-secondary" id="failing-filter-btn" style="font-size:12px;" onclick="toggleFailingFilter()">⚠ Show failing only</button>
-  <button class="btn btn-secondary" id="auto-refresh-btn" style="font-size:12px;" onclick="toggleAutoRefresh()">⏱ Auto-refresh: off</button>
+<!-- Collapsible filter/sort panel -->
+<div id="filter-panel" style="display:none;margin-bottom:.75rem;padding:.65rem .85rem;
+     border:1px solid var(--border);border-radius:8px;background:var(--surface);
+     display:none;flex-wrap:wrap;gap:.6rem .75rem;align-items:center;">
+
+  <div style="display:flex;align-items:center;gap:.4rem;font-size:13px;">
+    <span style="color:var(--text-muted);font-size:12px;font-weight:600;text-transform:uppercase;letter-spacing:.04em;">Platform</span>
+    <label style="display:flex;align-items:center;gap:.25rem;cursor:pointer;">
+      <input type="checkbox" id="platform-cb-all" onchange="platformCbAll(this)" checked> All
+    </label>
+    <label style="display:flex;align-items:center;gap:.25rem;cursor:pointer;">
+      <input type="checkbox" class="platform-cb" value="vercel" onchange="updatePlatformFilter()"> Vercel
+    </label>
+    <label style="display:flex;align-items:center;gap:.25rem;cursor:pointer;">
+      <input type="checkbox" class="platform-cb" value="netlify" onchange="updatePlatformFilter()"> Netlify
+    </label>
+    <label style="display:flex;align-items:center;gap:.25rem;cursor:pointer;">
+      <input type="checkbox" class="platform-cb" value="render" onchange="updatePlatformFilter()"> Render
+    </label>
+  </div>
+
+  <div style="width:1px;height:1.2rem;background:var(--border);"></div>
+
+  <div style="display:flex;align-items:center;gap:.4rem;font-size:13px;">
+    <span style="color:var(--text-muted);font-size:12px;font-weight:600;text-transform:uppercase;letter-spacing:.04em;">Project</span>
+    <select id="project-filter-select" style="font-size:13px;padding:.25rem .45rem;
+           border:1px solid var(--border);border-radius:4px;background:var(--bg);
+           color:var(--text);cursor:pointer;" onchange="setProjectFilter(this.value)">
+      <option value="">All</option>
+      <option value="unassigned">Unassigned</option>
+    </select>
+  </div>
+
+  <div style="width:1px;height:1.2rem;background:var(--border);"></div>
+
+  <div style="display:flex;align-items:center;gap:.4rem;font-size:13px;">
+    <span style="color:var(--text-muted);font-size:12px;font-weight:600;text-transform:uppercase;letter-spacing:.04em;">Type</span>
+    <select id="type-filter-select" style="font-size:13px;padding:.25rem .45rem;
+           border:1px solid var(--border);border-radius:4px;background:var(--bg);
+           color:var(--text);cursor:pointer;" onchange="setTypeFilter(this.value)">
+      <option value="">All</option>
+      <option value="static">Static</option>
+      <option value="backend">Backend</option>
+    </select>
+  </div>
+
+  <div style="width:1px;height:1.2rem;background:var(--border);"></div>
+
+  <div style="display:flex;align-items:center;gap:.4rem;font-size:13px;">
+    <span style="color:var(--text-muted);font-size:12px;font-weight:600;text-transform:uppercase;letter-spacing:.04em;">Sort</span>
+    <select id="sort-select" style="font-size:13px;padding:.25rem .45rem;
+           border:1px solid var(--border);border-radius:4px;background:var(--bg);
+           color:var(--text);cursor:pointer;" onchange="setSortOrder(this.value)">
+      <option value="default">Default</option>
+      <option value="name">Name A–Z</option>
+      <option value="last_deployed">Last Deployed</option>
+      <option value="status">Status</option>
+    </select>
+  </div>
 </div>
 
 <div style="display:flex;gap:.5rem;flex-wrap:wrap;margin-bottom:1rem;">
@@ -184,6 +209,8 @@
   let typeFilter = "";                // "" = all, "static", "backend"
   let statusFilter = "";             // "" = all, "failed", "deploying"
   let searchQuery = "";
+  let sortOrder = localStorage.getItem("sortOrder") || "default";
+  const pingResults = {};  // id → {up, status_code, response_ms, reason}
   let allProjects = [];
   let allDeployments = [];
   let collapsedProjects = new Set(JSON.parse(localStorage.getItem('collapsedProjects') || '[]'));
@@ -257,16 +284,18 @@
 
   // --- Platform filter dropdown ---
 
-  function togglePlatformDropdown() {
-    const opts = document.getElementById("platform-filter-options");
-    opts.style.display = opts.style.display === "none" ? "block" : "none";
+  function toggleFilterPanel() {
+    const panel = document.getElementById("filter-panel");
+    const icon = document.getElementById("filter-toggle-icon");
+    const open = panel.style.display === "flex";
+    panel.style.display = open ? "none" : "flex";
+    if (icon) icon.textContent = open ? "▾" : "▴";
   }
 
   function platformCbAll(cb) {
     if (cb.checked) {
       document.querySelectorAll(".platform-cb").forEach(c => { c.checked = false; });
       selectedPlatforms.clear();
-      updatePlatformLabel();
       renderDashboard();
     }
   }
@@ -275,26 +304,8 @@
     const checked = [...document.querySelectorAll(".platform-cb:checked")].map(c => c.value);
     selectedPlatforms = new Set(checked);
     document.getElementById("platform-cb-all").checked = checked.length === 0;
-    updatePlatformLabel();
     renderDashboard();
   }
-
-  function updatePlatformLabel() {
-    const lbl = document.getElementById("platform-label");
-    if (selectedPlatforms.size === 0) {
-      lbl.textContent = "All Platforms";
-    } else {
-      lbl.textContent = [...selectedPlatforms].map(p => p.charAt(0).toUpperCase() + p.slice(1)).join(", ");
-    }
-  }
-
-  document.addEventListener("click", e => {
-    const wrap = document.getElementById("platform-dd-wrap");
-    if (wrap && !wrap.contains(e.target)) {
-      const opts = document.getElementById("platform-filter-options");
-      if (opts) opts.style.display = "none";
-    }
-  });
 
   // --- Project filter ---
 
@@ -319,6 +330,63 @@
     setStatusFilter(statusFilter === "failed" ? "" : "failed");
   }
 
+  async function pingDeployment(id) {
+    const dot = document.getElementById("ping-dot-" + id);
+    const btn = document.getElementById("ping-btn-" + id);
+    const lbl = document.getElementById("ping-lbl-" + id);
+    if (dot) dot.className = "ping-dot";
+    if (btn) btn.disabled = true;
+    if (lbl) lbl.textContent = "…";
+    try {
+      const resp = await fetch("/api/deployments/" + id + "/ping");
+      const data = await resp.json();
+      pingResults[id] = data;
+      if (dot) dot.className = "ping-dot " + (data.up === true ? "ping-dot-up" : data.up === false ? "ping-dot-down" : "");
+      if (lbl) lbl.textContent = data.up === null ? "no URL" : data.up ? `${data.response_ms}ms` : (data.reason === "unreachable" ? "unreachable" : `${data.status_code}`);
+    } catch {
+      if (lbl) lbl.textContent = "error";
+    } finally {
+      if (btn) btn.disabled = false;
+    }
+  }
+
+  async function pingAll() {
+    const ids = allDeployments.filter(d => d.url).map(d => d.id);
+    await Promise.all(ids.map(pingDeployment));
+  }
+
+  async function pingProject(projectId) {
+    const ids = allDeployments.filter(d => d.project_id === projectId && d.url).map(d => d.id);
+    await Promise.all(ids.map(pingDeployment));
+  }
+
+  function setSortOrder(value) {
+    sortOrder = value;
+    localStorage.setItem("sortOrder", value);
+    renderDashboard();
+  }
+
+  function sortDeployments(list) {
+    const copy = [...list];
+    if (sortOrder === "name") {
+      copy.sort((a, b) => (a.project_name || "").localeCompare(b.project_name || ""));
+    } else if (sortOrder === "last_deployed") {
+      copy.sort((a, b) => {
+        const ta = a.last_deployed_at ? new Date(a.last_deployed_at + (a.last_deployed_at.endsWith("Z") ? "" : "Z")) : new Date(0);
+        const tb = b.last_deployed_at ? new Date(b.last_deployed_at + (b.last_deployed_at.endsWith("Z") ? "" : "Z")) : new Date(0);
+        return tb - ta;
+      });
+    } else if (sortOrder === "status") {
+      const order = ["deploying", "building", "failed", "error", "ready", "live", "suspended", "unknown"];
+      copy.sort((a, b) => {
+        const ia = order.indexOf((a.status || "").toLowerCase());
+        const ib = order.indexOf((b.status || "").toLowerCase());
+        return (ia === -1 ? 99 : ia) - (ib === -1 ? 99 : ib);
+      });
+    }
+    return copy;
+  }
+
   function collapseAllProjects() {
     allProjects.forEach(p => collapsedProjects.add(p.id));
     localStorage.setItem('collapsedProjects', JSON.stringify([...collapsedProjects]));
@@ -336,10 +404,10 @@
     if (autoRefreshTimer) {
       clearInterval(autoRefreshTimer);
       autoRefreshTimer = null;
-      if (btn) { btn.textContent = "⏱ Auto-Refresh: Off"; btn.style.color = ""; }
+      if (btn) { btn.title = "Auto-refresh: off"; btn.style.color = ""; }
     } else {
       autoRefreshTimer = setInterval(loadAll, 60000);
-      if (btn) { btn.textContent = "⏱ Auto-Refresh: On"; btn.style.color = "var(--success)"; }
+      if (btn) { btn.title = "Auto-refresh: on"; btn.style.color = "var(--success)"; }
     }
   }
 
@@ -474,7 +542,7 @@
             <div class="card-meta">
               <span class="platform-badge platform-badge-${d.platform}">${escHtml(d.platform)}</span>
               ${d.deployment_type ? ` <span class="type-badge type-badge-${d.deployment_type}">${d.deployment_type}</span>` : ""}
-              ${d.created_at ? ` · <span title="${escHtml(formatDate(d.created_at))}">${relativeTime(d.created_at)}</span>` : ""}
+              ${d.last_deployed_at ? ` · deployed <span title="${escHtml(formatDate(d.last_deployed_at))}">${relativeTime(d.last_deployed_at)}</span>` : d.created_at ? ` · added <span title="${escHtml(formatDate(d.created_at))}">${relativeTime(d.created_at)}</span>` : ""}
             </div>
           </div>
           <div style="display:flex;align-items:center;gap:.5rem;">
@@ -512,6 +580,16 @@
           <div style="margin-top:.3rem;font-size:11px;color:var(--text-muted);">
             ℹ Auto-deploy on push requires the Vercel GitHub App (Vercel dashboard → Integrations → GitHub).
           </div>` : ""}
+        ${d.platform === "netlify" && d.repo_url ? `
+          <div style="margin-top:.3rem;font-size:11px;color:var(--text-muted);">
+            ℹ Auto-deploy on push requires the Netlify GitHub App (Netlify dashboard → Site configuration → Build &amp; deploy → Continuous deployment).
+          </div>` : ""}
+        ${d.url ? `
+        <div style="margin-top:.35rem;display:flex;align-items:center;gap:.5rem;font-size:12px;color:var(--text-muted);">
+          <span class="ping-dot ${pingResults[d.id] ? (pingResults[d.id].up ? 'ping-dot-up' : 'ping-dot-down') : ''}" id="ping-dot-${d.id}"></span>
+          <span id="ping-lbl-${d.id}">${pingResults[d.id] ? (pingResults[d.id].up ? pingResults[d.id].response_ms + 'ms' : (pingResults[d.id].reason === 'unreachable' ? 'unreachable' : String(pingResults[d.id].status_code))) : 'not checked'}</span>
+          <button id="ping-btn-${d.id}" class="btn btn-secondary" style="padding:.15rem .45rem;font-size:11px;" onclick="pingDeployment(${d.id})">Ping</button>
+        </div>` : ""}
         <div style="margin-top:.4rem;font-size:12px;color:var(--text-muted);display:flex;align-items:center;gap:.75rem;flex-wrap:wrap;">
           <span>Project: ${projectSelector(d)}</span>
           <span>Type: <select style="font-size:12px;border:1px solid var(--border);border-radius:4px;
@@ -570,6 +648,9 @@
             <button class="btn btn-secondary" id="proj-deploy-${project.id}"
                     style="padding:.2rem .55rem;font-size:12px;"
                     onclick="deployProject(${project.id})" title="Redeploy all in this project">▶ Deploy All</button>
+            <button class="btn btn-secondary"
+                    style="padding:.2rem .55rem;font-size:12px;"
+                    onclick="pingProject(${project.id})" title="Ping all sites in this project">⬤ Ping All</button>
             <button class="btn btn-danger"
                     style="padding:.2rem .55rem;font-size:12px;"
                     onclick="deleteProject(${project.id}, '${escHtml(project.name)}')">Delete</button>
@@ -622,20 +703,18 @@
     const list = document.getElementById("deployments-list");
 
     // Platform + search filter (client-side)
-    const filtered = allDeployments.filter(d =>
+    const filtered = sortDeployments(allDeployments.filter(d =>
       (selectedPlatforms.size === 0 || selectedPlatforms.has(d.platform)) &&
       (typeFilter === "" || d.deployment_type === typeFilter) &&
       (statusFilter === "" || (d.status || "").toLowerCase().includes(statusFilter)) &&
       matchesSearch(d)
-    );
+    ));
 
     let html = "";
 
     if (projectFilter === "unassigned") {
       const unassigned = filtered.filter(d => !d.project_id);
-      if (unassigned.length) {
-        html = `<div style="margin-bottom:1.5rem;">${unassigned.map(renderCard).join("")}</div>`;
-      }
+      if (unassigned.length) html = renderUnassignedSection(unassigned);
     } else if (projectFilter !== "") {
       const pid = parseInt(projectFilter);
       const project = allProjects.find(p => p.id === pid);
@@ -660,15 +739,7 @@
         html += renderProjectSection(project, byProject.get(project.id) || []);
       }
 
-      if (unassigned.length) {
-        const heading = allProjects.length
-          ? `<div class="project-section-header" style="cursor:default;" onclick="">
-               <strong style="font-size:15px;letter-spacing:-.2px;">Unassigned</strong>
-               <span class="project-count-pill">${unassigned.length}</span>
-             </div>`
-          : "";
-        html += `<div style="margin-bottom:1.75rem;">${heading}${unassigned.map(renderCard).join("")}</div>`;
-      }
+      if (unassigned.length) html += renderUnassignedSection(unassigned);
     }
 
     if (!html) {
@@ -699,6 +770,7 @@
       allProjects = await projResp.json();
       allDeployments = await depResp.json();
       updateProjectFilterSelect();
+      document.getElementById("sort-select").value = sortOrder;
       renderDashboard();
       requestNotificationPermission();
     } catch {
@@ -817,6 +889,112 @@
       const btn = document.getElementById("proj-" + action + "-" + projectId);
       if (btn) btn.disabled = disabled;
     });
+  }
+
+  // --- Unassigned section helpers ---
+
+  function _unassignedFeedback(text, clear) {
+    const el = document.getElementById("unassigned-msg");
+    if (el) el.textContent = text;
+    if (clear) setTimeout(() => { if (el) el.textContent = ""; }, 3000);
+  }
+
+  function _unassignedSetButtons(disabled) {
+    ["refresh", "sync", "deploy", "ping"].forEach(action => {
+      const btn = document.getElementById("unassigned-btn-" + action);
+      if (btn) btn.disabled = disabled;
+    });
+  }
+
+  function toggleUnassignedCollapse() {
+    if (collapsedProjects.has("unassigned")) collapsedProjects.delete("unassigned");
+    else collapsedProjects.add("unassigned");
+    localStorage.setItem("collapsedProjects", JSON.stringify([...collapsedProjects]));
+    renderDashboard();
+  }
+
+  async function refreshUnassigned() {
+    _unassignedSetButtons(true);
+    _unassignedFeedback("Refreshing…");
+    try {
+      const resp = await fetch("/api/deployments/");
+      if (resp.ok) { allDeployments = await resp.json(); renderDashboard(); _unassignedFeedback("Refreshed.", true); }
+    } catch { _unassignedFeedback("Error.", true); }
+    _unassignedSetButtons(false);
+  }
+
+  async function syncUnassigned() {
+    const targets = allDeployments.filter(d =>
+      !d.project_id && d.platform_deployment_id && !["pending", "unknown"].includes(d.platform_deployment_id)
+    );
+    if (!targets.length) { _unassignedFeedback("Nothing to sync.", true); return; }
+    _unassignedSetButtons(true);
+    let done = 0;
+    _unassignedFeedback(`Syncing 0 / ${targets.length}…`);
+    for (const d of targets) {
+      try {
+        const resp = await fetch("/api/deployments/" + d.id + "/sync", {method: "POST"});
+        if (resp.ok) { const u = await resp.json(); const i = allDeployments.findIndex(x => x.id === d.id); if (i !== -1) allDeployments[i] = u; }
+      } catch { /* continue */ }
+      _unassignedFeedback(`Syncing ${++done} / ${targets.length}…`);
+    }
+    renderDashboard();
+    _unassignedSetButtons(false);
+    _unassignedFeedback(`Synced ${done}.`, true);
+  }
+
+  async function deployUnassigned() {
+    const targets = allDeployments.filter(d => !d.project_id);
+    if (!targets.length) { _unassignedFeedback("No deployments.", true); return; }
+    if (!confirm(`Redeploy all ${targets.length} unassigned deployment${targets.length !== 1 ? "s" : ""}?`)) return;
+    _unassignedSetButtons(true);
+    let done = 0;
+    _unassignedFeedback(`Deploying 0 / ${targets.length}…`);
+    for (const d of targets) {
+      try {
+        const resp = await fetch("/api/deployments/" + d.id + "/redeploy", {method: "POST"});
+        if (resp.ok) { const u = await resp.json(); const i = allDeployments.findIndex(x => x.id === d.id); if (i !== -1) allDeployments[i] = u; }
+      } catch { /* continue */ }
+      _unassignedFeedback(`Deploying ${++done} / ${targets.length}…`);
+    }
+    renderDashboard();
+    _unassignedSetButtons(false);
+    _unassignedFeedback(`Deployed ${done}.`, true);
+  }
+
+  async function pingUnassigned() {
+    const ids = allDeployments.filter(d => !d.project_id && d.url).map(d => d.id);
+    await Promise.all(ids.map(pingDeployment));
+  }
+
+  function renderUnassignedSection(deployments) {
+    const isCollapsed = collapsedProjects.has("unassigned");
+    const chevron = isCollapsed ? "▶" : "▼";
+    const body = isCollapsed ? "" : deployments.map(renderCard).join("");
+    return `
+      <div style="margin-bottom:1.75rem;">
+        <div class="project-section-header" onclick="toggleUnassignedCollapse()">
+          <span class="project-chevron">${chevron}</span>
+          <strong style="font-size:15px;letter-spacing:-.2px;">Unassigned</strong>
+          <span class="project-count-pill">${deployments.length}</span>
+          <span id="unassigned-msg" style="font-size:12px;color:var(--text-muted);margin-left:.5rem;"></span>
+          <div style="display:flex;gap:.35rem;margin-left:auto;" onclick="event.stopPropagation()">
+            <button class="btn btn-secondary" id="unassigned-btn-refresh"
+                    style="padding:.2rem .55rem;font-size:12px;"
+                    onclick="refreshUnassigned()" title="Re-fetch from local DB">↺ Refresh</button>
+            <button class="btn btn-secondary" id="unassigned-btn-sync"
+                    style="padding:.2rem .55rem;font-size:12px;"
+                    onclick="syncUnassigned()" title="Sync all from platform API">↻ Sync All</button>
+            <button class="btn btn-secondary" id="unassigned-btn-deploy"
+                    style="padding:.2rem .55rem;font-size:12px;"
+                    onclick="deployUnassigned()" title="Redeploy all unassigned">▶ Deploy All</button>
+            <button class="btn btn-secondary" id="unassigned-btn-ping"
+                    style="padding:.2rem .55rem;font-size:12px;"
+                    onclick="pingUnassigned()" title="Ping all unassigned sites">⬤ Ping All</button>
+          </div>
+        </div>
+        ${body}
+      </div>`;
   }
 
   async function refreshProject(projectId) {

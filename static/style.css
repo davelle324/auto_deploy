@@ -370,6 +370,17 @@ h2 { font-size: 18px; font-weight: 600; letter-spacing: -.2px; margin-bottom: .9
 [data-theme="dark"] .type-badge-static  { background: #0c2a3d; color: #7dd3fc; }
 [data-theme="dark"] .type-badge-backend { background: #1e0a40; color: #c4b5fd; }
 
+/* ── Ping dot ─────────────────────────────────────────────────────────────── */
+.ping-dot {
+  display: inline-block;
+  width: 8px; height: 8px;
+  border-radius: 50%;
+  background: var(--border);
+  flex-shrink: 0;
+}
+.ping-dot-up   { background: var(--success); }
+.ping-dot-down { background: var(--danger); }
+
 /* ── Project sections ─────────────────────────────────────────────────────── */
 .project-section-header {
   display: flex;

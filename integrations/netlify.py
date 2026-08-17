@@ -4,7 +4,9 @@ from typing import Optional
 
 import httpx
 
-from integrations.base import BasePlatformClient, DeployResult, build_result, normalize_status, safe_delete
+from integrations.base import (
+    BasePlatformClient, DeployResult, build_result, normalize_status, safe_delete,
+)
 
 NETLIFY_API = "https://api.netlify.com/api/v1"
 
@@ -46,7 +48,8 @@ class NetlifyClient(BasePlatformClient):
                 errors = resp.json().get("errors", {})
                 if "subdomain" in errors:
                     raise ValueError(
-                        f"Project name '{project_name}' is already taken on Netlify — choose a different name"
+                        f"Project name '{project_name}' is already taken on Netlify"
+                        " — choose a different name"
                     )
                 raise ValueError(f"Netlify rejected the request: {resp.text}")
             resp.raise_for_status()
@@ -215,7 +218,7 @@ class NetlifyClient(BasePlatformClient):
                 entries = log_resp.json()
                 if isinstance(entries, list):
                     return [e["m"] for e in entries if isinstance(e, dict) and e.get("m")]
-            except Exception:  # pylint: disable=broad-except
+            except Exception:  # pylint: disable=broad-except  # nosec B110
                 pass
             return [line for line in log_resp.text.splitlines() if line.strip()]
 

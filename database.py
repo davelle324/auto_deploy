@@ -49,3 +49,7 @@ async def init_db():  # pragma: no cover
             await conn.execute(text(
                 "ALTER TABLE deployments ADD COLUMN notes TEXT"
             ))
+        if "last_deployed_at" not in cols:
+            await conn.execute(text(
+                "ALTER TABLE deployments ADD COLUMN last_deployed_at DATETIME"
+            ))

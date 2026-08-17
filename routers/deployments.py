@@ -1,7 +1,11 @@
 """API routes for creating and querying deployments."""
 
 import logging
+import time
+from datetime import datetime, timezone
 from typing import Optional
+
+import httpx
 
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy import select
@@ -91,6 +95,7 @@ async def create_deployment(data: DeploymentCreate, db: AsyncSession = Depends(g
         detail = f"Platform API error: {exc}" + (f" — {body}" if body else "")
         raise HTTPException(status_code=502, detail=detail) from exc
 
+    now = datetime.now(timezone.utc)
     deployment = Deployment(
         platform=data.platform,
         project_name=data.project_name,
@@ -98,7 +103,12 @@ async def create_deployment(data: DeploymentCreate, db: AsyncSession = Depends(g
         url=result.url,
         status=result.status,
         repo_url=data.repo_url,
-        deployment_type=data.deployment_type or result.deployment_type or _PLATFORM_TYPE_DEFAULTS.get(data.platform),
+        deployment_type=(
+            data.deployment_type
+            or result.deployment_type
+            or _PLATFORM_TYPE_DEFAULTS.get(data.platform)
+        ),
+        last_deployed_at=now,
     )
     db.add(deployment)
     await db.flush()
@@ -174,6 +184,7 @@ async def redeploy_deployment(deployment_id: int, db: AsyncSession = Depends(get
         raise HTTPException(status_code=502, detail=detail) from exc
 
     deployment.status = deploy_result.status
+    deployment.last_deployed_at = datetime.now(timezone.utc)
     # Update the deployment ID if the platform issued a new one (e.g. Vercel)
     if deploy_result.platform_deployment_id:
         deployment.platform_deployment_id = deploy_result.platform_deployment_id
@@ -459,6 +470,26 @@ async def set_deployment_notes(
     await db.commit()
     await db.refresh(deployment)
     return deployment
+
+
+@router.get("/{deployment_id}/ping")
+async def ping_deployment(deployment_id: int, db: AsyncSession = Depends(get_db)):
+    """HTTP-ping the deployment URL and return uptime status and response time."""
+    result = await db.execute(select(Deployment).where(Deployment.id == deployment_id))
+    deployment = result.scalar_one_or_none()
+    if not deployment:
+        raise HTTPException(status_code=404, detail="Deployment not found")
+    if not deployment.url:
+        return {"up": None, "status_code": None, "response_ms": None, "reason": "no_url"}
+    try:
+        async with httpx.AsyncClient(follow_redirects=True, timeout=8.0) as client:
+            t0 = time.monotonic()
+            resp = await client.get(deployment.url)
+            ms = int((time.monotonic() - t0) * 1000)
+        up = resp.status_code < 500
+        return {"up": up, "status_code": resp.status_code, "response_ms": ms, "reason": None}
+    except Exception:  # pylint: disable=broad-exception-caught
+        return {"up": False, "status_code": None, "response_ms": None, "reason": "unreachable"}
 
 
 @router.delete("/{deployment_id}/untrack")

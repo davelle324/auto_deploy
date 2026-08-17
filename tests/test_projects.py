@@ -1,4 +1,4 @@
-# pylint: disable=missing-module-docstring,missing-function-docstring,line-too-long
+# pylint: disable=missing-module-docstring,missing-function-docstring,line-too-long,invalid-name
 from unittest.mock import AsyncMock, patch
 
 import pytest

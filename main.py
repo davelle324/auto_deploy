@@ -23,7 +23,7 @@ async def lifespan(_app: FastAPI):  # pragma: no cover
     yield
 
 
-class AuthMiddleware(BaseHTTPMiddleware):
+class AuthMiddleware(BaseHTTPMiddleware):  # pylint: disable=too-few-public-methods
     """Redirect unauthenticated requests to /login when APP_PASSWORD is set."""
 
     async def dispatch(self, request: Request, call_next):

@@ -51,6 +51,15 @@
       <p class="form-hint">Group this deployment under an existing project.</p>
     </div>
 
+    <!-- Platform-specific notes -->
+    <div id="netlify-note" style="display:none;margin-top:.25rem;font-size:12px;
+         color:var(--text-muted);background:var(--surface);border:1px solid var(--border);
+         border-radius:6px;padding:.5rem .75rem;">
+      ℹ Netlify requires manual GitHub App installation before auto-deploy on push will work.
+      After creating, go to <strong>Netlify dashboard → your site → Site configuration → Build &amp; deploy → Continuous deployment</strong>
+      and connect your GitHub account if prompted.
+    </div>
+
     <!-- Advanced options toggle -->
     <div style="margin-top:.25rem;">
       <button type="button" onclick="toggleAdvanced()"
@@ -159,10 +168,10 @@
     return result;
   }
 
-  // Auto-set type and show/hide build config when platform changes
+  // Auto-set type and show/hide platform-specific UI when platform changes
   document.getElementById("platform").addEventListener("change", function () {
-    const sec = document.getElementById("build-config-section");
-    sec.style.display = this.value === "render" ? "flex" : "none";
+    document.getElementById("build-config-section").style.display = this.value === "render" ? "flex" : "none";
+    document.getElementById("netlify-note").style.display = this.value === "netlify" ? "block" : "none";
     const typeEl = document.getElementById("deployment_type");
     if (this.value === "vercel" || this.value === "netlify") typeEl.value = "static";
     else if (this.value === "render") typeEl.value = "";

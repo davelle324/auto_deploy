@@ -6,7 +6,10 @@ from typing import Optional
 
 import httpx
 
-from integrations.base import BasePlatformClient, DeployResult, PartialDeployError, build_result, normalize_status, safe_delete
+from integrations.base import (
+    BasePlatformClient, DeployResult, PartialDeployError,
+    build_result, normalize_status, safe_delete,
+)
 
 VERCEL_API = "https://api.vercel.com"
 

@@ -7,6 +7,7 @@ import os
 # Must be set before any app module imports so config/database use these values.
 os.environ.setdefault("SECRET_KEY", "test-secret-key-for-pytest-only-32x")
 os.environ.setdefault("DATABASE_URL", "sqlite+aiosqlite:///:memory:")
+os.environ["APP_PASSWORD"] = ""  # always disable auth in tests
 
 import database  # noqa: E402 — import after env vars
 import pytest_asyncio  # noqa: E402

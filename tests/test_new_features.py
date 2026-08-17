@@ -1,4 +1,4 @@
-# pylint: disable=missing-module-docstring,missing-function-docstring,invalid-name,redefined-outer-name,line-too-long,unused-argument
+# pylint: disable=missing-module-docstring,missing-function-docstring,invalid-name,redefined-outer-name,line-too-long,unused-argument,unused-import,import-outside-toplevel
 import json
 from unittest.mock import AsyncMock, patch
 

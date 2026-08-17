@@ -111,6 +111,7 @@ class DeploymentResponse(BaseModel):
     project_id: Optional[int] = None
     deployment_type: Optional[str] = None
     notes: Optional[str] = None
+    last_deployed_at: Optional[datetime] = None
     created_at: datetime
 
     model_config = {"from_attributes": True}

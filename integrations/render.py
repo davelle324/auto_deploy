@@ -4,7 +4,9 @@ from typing import Optional
 
 import httpx
 
-from integrations.base import BasePlatformClient, DeployResult, build_result, normalize_status, safe_delete
+from integrations.base import (
+    BasePlatformClient, DeployResult, build_result, normalize_status, safe_delete,
+)
 
 RENDER_API = "https://api.render.com/v1"
 
@@ -206,7 +208,7 @@ class RenderClient(BasePlatformClient):
         )
 
     async def get_build_config(
-        self, platform_deployment_id: str, project_name: str
+        self, platform_deployment_id: str, project_name: str  # pylint: disable=unused-argument
     ) -> dict:
         """Return the current build command and response headers for a Render service."""
         async with httpx.AsyncClient() as client:
@@ -228,7 +230,7 @@ class RenderClient(BasePlatformClient):
     async def update_build_command(
         self,
         platform_deployment_id: str,
-        project_name: str,
+        project_name: str,  # pylint: disable=unused-argument
         build_command: str,
         apply_cors: bool = True,
     ) -> None:
@@ -243,7 +245,8 @@ class RenderClient(BasePlatformClient):
             "buildCommand": build_command,
             "headers": [
                 {"path": "/*", "name": "Access-Control-Allow-Origin", "value": "*"},
-                {"path": "/*", "name": "Access-Control-Allow-Methods", "value": "GET, HEAD, OPTIONS"},
+                {"path": "/*", "name": "Access-Control-Allow-Methods",  # pylint: disable=line-too-long
+                 "value": "GET, HEAD, OPTIONS"},
                 {"path": "/*", "name": "Access-Control-Allow-Headers", "value": "*"},
             ] if apply_cors else [],
         }
@@ -346,7 +349,7 @@ class RenderClient(BasePlatformClient):
                             lines = self._extract_log_lines(entries)
                             if lines:
                                 return lines
-                    except Exception:
+                    except Exception:  # pylint: disable=broad-exception-caught  # nosec B110
                         pass
                     text = log_resp.text.strip()
                     if text:
@@ -453,7 +456,9 @@ class RenderClient(BasePlatformClient):
                 json={"name": domain},
             )
             if resp.status_code >= 400:
-                raise ValueError(f"Render rejected domain '{domain}': {resp.status_code} — {resp.text}")
+                raise ValueError(
+                    f"Render rejected domain '{domain}': {resp.status_code} — {resp.text}"
+                )
 
     async def remove_domain(
         self, platform_deployment_id: str, project_name: str, domain: str
