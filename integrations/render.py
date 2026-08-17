@@ -106,7 +106,7 @@ class RenderClient(BasePlatformClient):
             resp = await client.get(
                 f"{RENDER_API}/services",
                 headers=self._headers,
-                params={"type": "static_site", "limit": 100},
+                params={"limit": 100},
             )
             resp.raise_for_status()
             services = resp.json()
@@ -147,7 +147,7 @@ class RenderClient(BasePlatformClient):
             resp = await client.get(
                 f"{RENDER_API}/services",
                 headers=self._headers,
-                params={"name": project_name, "type": "static_site", "limit": 100},
+                params={"name": project_name, "limit": 100},
             )
             if resp.status_code != 200:
                 return None
@@ -167,7 +167,7 @@ class RenderClient(BasePlatformClient):
             resp = await client.get(
                 f"{RENDER_API}/services",
                 headers=self._headers,
-                params={"name": project_name, "type": "static_site", "limit": 100},
+                params={"name": project_name, "limit": 100},
             )
             if resp.status_code != 200:
                 return None
