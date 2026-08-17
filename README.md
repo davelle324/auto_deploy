@@ -156,6 +156,8 @@ The full OpenAPI spec is at `/docs` (Swagger UI) and `/redoc`.
 
 Fly.io hosts the app on their servers so it runs 24/7 without your computer needing to be on. You get a public URL (e.g. `https://your-app.fly.dev`) protected by the login password you set.
 
+https://auto-deploy.fly.dev/
+
 ### First-time setup
 
 **1. Install the Fly CLI and log in**
@@ -173,19 +175,29 @@ fly auth login
 
 **3. Launch the app** (run once from the project directory)
 ```bash
-fly launch
+fly launch --region <region-code>
 ```
 When prompted:
 - Choose an app name (or accept the generated one)
-- Choose a region close to you
 - Say **no** to adding a PostgreSQL database
 - Say **no** to deploying now (you need to set up the volume first)
 
+Common region codes (there is no Boston — pick the closest):
+
+| Code | Location |
+|------|----------|
+| `ewr` | Secaucus, NJ (closest to Boston/NYC) |
+| `iad` | Ashburn, VA (US East default) |
+| `ord` | Chicago, IL |
+| `lax` | Los Angeles, CA |
+| `lhr` | London, UK |
+| `fra` | Frankfurt, DE |
+
 **4. Create a persistent volume for the SQLite database**
 ```bash
-fly volumes create auto_deploy_data --size 1 --region <your-region>
+fly volumes create auto_deploy_data --size 1 --region <region-code>
 ```
-Replace `<your-region>` with the region you chose (e.g. `iad`, `lhr`, `syd`).
+Use the same region code you passed to `fly launch` (e.g. `ewr`).
 
 **5. Add the volume mount to `fly.toml`** — open the generated `fly.toml` and add:
 ```toml
