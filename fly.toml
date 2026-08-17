@@ -20,6 +20,7 @@ primary_region = 'ewr'
   cpu_kind = 'shared'
   cpus = 1
   memory_mb = 1024
+  count = 1
 
 [mounts]
   source = "auto_deploy_data"
