@@ -129,6 +129,7 @@ class RenderClient(BasePlatformClient):
                     url=self._extract_url(service),
                     status=status,
                     project_name=service.get("name", ""),
+                    repo_url=service.get("repo") or None,
                     deployment_type=deployment_type,
                 )
             )

@@ -195,9 +195,9 @@ Common region codes (there is no Boston — pick the closest):
 
 **4. Create a persistent volume for the SQLite database**
 ```bash
-fly volumes create auto_deploy_data --size 1 --region <region-code>
+fly volumes create auto_deploy_data -r <region-code> -n 1
 ```
-Use the same region code you passed to `fly launch` (e.g. `ewr`).
+Use the same region code you passed to `fly launch` (e.g. `ewr`). The `-n 1` flag specifies one volume — Fly.io requires this exact syntax; `--size` and `--region` are not accepted in newer CLI versions.
 
 **5. Add the volume mount to `fly.toml`** — open the generated `fly.toml` and add:
 ```toml
@@ -212,6 +212,10 @@ fly secrets set SECRET_KEY=$(python -c "import secrets; print(secrets.token_hex(
 fly secrets set APP_PASSWORD=choose-a-strong-password
 fly secrets set DATABASE_URL=sqlite+aiosqlite:////app/data/auto_deploy.db
 ```
+
+> **Important:** `DATABASE_URL` must point to the volume path (`/app/data/...`) before you deploy. If you deploy without it, the app uses the container's temporary filesystem and all data is lost on every restart.
+>
+> Setting secrets does **not** trigger a redeploy — you must run `fly deploy` after.
 
 **7. Deploy**
 ```bash

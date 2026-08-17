@@ -79,11 +79,17 @@ class NetlifyClient(BasePlatformClient):
         results = []
         for site in sites:
             url = site.get("ssl_url") or site.get("url")
+            # published_deploy.state reflects the actual build outcome (e.g. "error");
+            # site-level state stays "current" even after a failed build.
+            raw_state = (
+                (site.get("published_deploy") or {}).get("state")
+                or site.get("state", "unknown")
+            )
             results.append(
                 DeployResult(
                     platform_deployment_id=site["id"],
                     url=url,
-                    status=normalize_status(site.get("state", "unknown")),
+                    status=normalize_status(raw_state),
                     project_name=site.get("name", ""),
                     deployment_type="static",
                 )
