@@ -14,6 +14,8 @@ session_factory = async_sessionmaker(engine, expire_on_commit=False)
 def _set_sqlite_pragma(dbapi_conn, _connection_record):
     cursor = dbapi_conn.cursor()
     cursor.execute("PRAGMA foreign_keys=ON")
+    cursor.execute("PRAGMA journal_mode=WAL")
+    cursor.execute("PRAGMA busy_timeout=5000")
     cursor.close()
 
 
@@ -38,4 +40,12 @@ async def init_db():  # pragma: no cover
             await conn.execute(text(
                 "ALTER TABLE deployments ADD COLUMN"
                 " project_id INTEGER REFERENCES projects(id) ON DELETE SET NULL"
+            ))
+        if "deployment_type" not in cols:
+            await conn.execute(text(
+                "ALTER TABLE deployments ADD COLUMN deployment_type TEXT"
+            ))
+        if "notes" not in cols:
+            await conn.execute(text(
+                "ALTER TABLE deployments ADD COLUMN notes TEXT"
             ))

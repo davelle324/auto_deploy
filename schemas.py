@@ -43,6 +43,7 @@ class DeploymentCreate(BaseModel):
     platform: Platform
     project_name: str
     repo_url: Optional[str] = None
+    deployment_type: Optional[str] = None
 
     @field_validator("project_name")
     @classmethod
@@ -108,9 +109,23 @@ class DeploymentResponse(BaseModel):
     status: str
     repo_url: Optional[str] = None
     project_id: Optional[int] = None
+    deployment_type: Optional[str] = None
+    notes: Optional[str] = None
     created_at: datetime
 
     model_config = {"from_attributes": True}
+
+
+class DeploymentTypeUpdate(BaseModel):
+    """Request body for setting a deployment's type."""
+
+    deployment_type: Optional[str] = None
+
+
+class DeploymentNotesUpdate(BaseModel):
+    """Request body for updating deployment notes."""
+
+    notes: Optional[str] = None
 
 
 class ProjectCreate(BaseModel):

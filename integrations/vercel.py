@@ -374,6 +374,7 @@ class VercelClient(BasePlatformClient):
                     status=normalize_status(latest.get("readyState", "unknown")),
                     project_name=proj["name"],
                     repo_url=repo_url,
+                    deployment_type="static",
                 )
             )
         return results

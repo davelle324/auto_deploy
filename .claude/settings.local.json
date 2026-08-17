@@ -11,7 +11,8 @@
       "Bash(BANNER_MESSAGE=\"Hello from env vars!\" bash build.sh)",
       "Bash(node -e \"eval\\(require\\('fs'\\).readFileSync\\('env-config.js','utf8'\\).replace\\('window.','global.'\\)\\); console.log\\('Decoded:', global.ENV.BANNER_MESSAGE\\)\")",
       "Bash(bash build.sh)",
-      "Bash(python3 -c ' *)"
+      "Bash(python3 -c ' *)",
+      "Bash(pip install *)"
     ]
   }
 }

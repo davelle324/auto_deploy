@@ -67,6 +67,7 @@ class DeployResult:
     status: str
     project_name: str = ""
     repo_url: Optional[str] = field(default=None)
+    deployment_type: Optional[str] = field(default=None)
 
 
 async def safe_delete(client: httpx.AsyncClient, url: str, headers: dict) -> None:

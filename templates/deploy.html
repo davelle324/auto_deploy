@@ -35,6 +35,15 @@
     </div>
 
     <div class="form-group">
+      <label for="deployment_type">Type</label>
+      <select id="deployment_type" name="deployment_type">
+        <option value="">— unknown —</option>
+        <option value="static">Static</option>
+        <option value="backend">Backend</option>
+      </select>
+    </div>
+
+    <div class="form-group">
       <label for="project_id">Project <span style="color:var(--text-muted);font-weight:400">(optional)</span></label>
       <select id="project_id" name="project_id">
         <option value="">No project</option>
@@ -150,10 +159,13 @@
     return result;
   }
 
-  // Show/hide build config when platform changes
+  // Auto-set type and show/hide build config when platform changes
   document.getElementById("platform").addEventListener("change", function () {
     const sec = document.getElementById("build-config-section");
     sec.style.display = this.value === "render" ? "flex" : "none";
+    const typeEl = document.getElementById("deployment_type");
+    if (this.value === "vercel" || this.value === "netlify") typeEl.value = "static";
+    else if (this.value === "render") typeEl.value = "";
   });
 
   // ── Projects ──────────────────────────────────────────────────────────────
@@ -182,10 +194,11 @@
     btn.disabled = true;
     btn.textContent = "Deploying…";
 
-    const platform     = document.getElementById("platform").value;
-    const project_name = document.getElementById("project_name").value.trim().toLowerCase();
-    const repo_url     = document.getElementById("repo_url").value.trim() || null;
-    const project_id   = document.getElementById("project_id").value;
+    const platform        = document.getElementById("platform").value;
+    const project_name    = document.getElementById("project_name").value.trim().toLowerCase();
+    const repo_url        = document.getElementById("repo_url").value.trim() || null;
+    const project_id      = document.getElementById("project_id").value;
+    const deployment_type = document.getElementById("deployment_type").value || null;
     const envVars      = collectEnvVars();
     const buildCmd     = (document.getElementById("adv-build-cmd")?.value || "").trim();
     const applyCors    = document.getElementById("adv-cors-checkbox")?.checked ?? false;
@@ -195,7 +208,7 @@
       const resp = await fetch("/api/deployments/", {
         method: "POST",
         headers: {"Content-Type": "application/json"},
-        body: JSON.stringify({platform, project_name, repo_url}),
+        body: JSON.stringify({platform, project_name, repo_url, deployment_type}),
       });
       const data = await resp.json();
 

@@ -63,11 +63,26 @@
     <option value="unassigned">Unassigned only</option>
   </select>
 
+  <select id="type-filter-select" style="font-size:13px;padding:.35rem .6rem;
+         border:1px solid var(--border);border-radius:4px;background:var(--surface);
+         color:var(--text);cursor:pointer;" onchange="setTypeFilter(this.value)">
+    <option value="">All Types</option>
+    <option value="static">Static</option>
+    <option value="backend">Backend</option>
+  </select>
+
   <input id="search-input" type="search" placeholder="Search deployments…"
          style="font-size:13px;padding:.35rem .6rem;border:1px solid var(--border);
                 border-radius:4px;background:var(--surface);color:var(--text);
                 min-width:200px;"
          oninput="setSearch(this.value)">
+</div>
+
+<div style="display:flex;gap:.5rem;flex-wrap:wrap;margin-bottom:.75rem;align-items:center;">
+  <button class="btn btn-secondary" style="font-size:12px;" onclick="collapseAllProjects()">⊟ Collapse all</button>
+  <button class="btn btn-secondary" style="font-size:12px;" onclick="expandAllProjects()">⊞ Expand all</button>
+  <button class="btn btn-secondary" id="failing-filter-btn" style="font-size:12px;" onclick="toggleFailingFilter()">⚠ Show failing only</button>
+  <button class="btn btn-secondary" id="auto-refresh-btn" style="font-size:12px;" onclick="toggleAutoRefresh()">⏱ Auto-refresh: off</button>
 </div>
 
 <div style="display:flex;gap:.5rem;flex-wrap:wrap;margin-bottom:1rem;">
@@ -166,13 +181,45 @@
 <script>
   let selectedPlatforms = new Set();  // empty = all platforms
   let projectFilter = "";             // "" = all, "unassigned", or "<id>"
+  let typeFilter = "";                // "" = all, "static", "backend"
+  let statusFilter = "";             // "" = all, "failed", "deploying"
   let searchQuery = "";
   let allProjects = [];
   let allDeployments = [];
   let collapsedProjects = new Set(JSON.parse(localStorage.getItem('collapsedProjects') || '[]'));
+  let autoRefreshTimer = null;
 
   const PENDING_STATUSES = new Set(["deploying"]);
   const pollingTimers = {};
+
+  // ── Utility ────────────────────────────────────────────────────────────────
+
+  function relativeTime(isoString) {
+    if (!isoString) return "";
+    const ts = /Z|[+-]\d{2}:?\d{2}$/.test(isoString) ? isoString : isoString + "Z";
+    const diff = (Date.now() - new Date(ts).getTime()) / 1000;
+    if (diff < 60) return "just now";
+    if (diff < 3600) return Math.floor(diff / 60) + "m ago";
+    if (diff < 86400) return Math.floor(diff / 3600) + "h ago";
+    return Math.floor(diff / 86400) + "d ago";
+  }
+
+  // ── Notifications ──────────────────────────────────────────────────────────
+
+  function requestNotificationPermission() {
+    if ("Notification" in window && Notification.permission === "default") {
+      Notification.requestPermission();
+    }
+  }
+
+  function notifyDeployComplete(projectName, status) {
+    if (!("Notification" in window) || Notification.permission !== "granted") return;
+    const isReady = ["ready", "deployed"].includes(status);
+    new Notification(isReady ? "Deploy complete ✓" : "Deploy failed ✗", {
+      body: projectName,
+      icon: "/static/favicon.ico",
+    });
+  }
 
   function startPolling(id) {
     if (pollingTimers[id]) return;
@@ -254,6 +301,70 @@
   function setProjectFilter(value) {
     projectFilter = value;
     renderDashboard();
+  }
+
+  function setTypeFilter(value) {
+    typeFilter = value;
+    renderDashboard();
+  }
+
+  function setStatusFilter(value) {
+    statusFilter = value;
+    const btn = document.getElementById("failing-filter-btn");
+    if (btn) { btn.style.background = value === "failed" ? "var(--danger)" : ""; btn.style.color = value === "failed" ? "#fff" : ""; }
+    renderDashboard();
+  }
+
+  function toggleFailingFilter() {
+    setStatusFilter(statusFilter === "failed" ? "" : "failed");
+  }
+
+  function collapseAllProjects() {
+    allProjects.forEach(p => collapsedProjects.add(p.id));
+    localStorage.setItem('collapsedProjects', JSON.stringify([...collapsedProjects]));
+    renderDashboard();
+  }
+
+  function expandAllProjects() {
+    collapsedProjects.clear();
+    localStorage.setItem('collapsedProjects', JSON.stringify([]));
+    renderDashboard();
+  }
+
+  function toggleAutoRefresh() {
+    const btn = document.getElementById("auto-refresh-btn");
+    if (autoRefreshTimer) {
+      clearInterval(autoRefreshTimer);
+      autoRefreshTimer = null;
+      if (btn) { btn.textContent = "⏱ Auto-Refresh: Off"; btn.style.color = ""; }
+    } else {
+      autoRefreshTimer = setInterval(loadAll, 60000);
+      if (btn) { btn.textContent = "⏱ Auto-Refresh: On"; btn.style.color = "var(--success)"; }
+    }
+  }
+
+  async function saveNotes(id, value) {
+    try {
+      await fetch("/api/deployments/" + id + "/notes", {
+        method: "PATCH",
+        headers: {"Content-Type": "application/json"},
+        body: JSON.stringify({notes: value || null}),
+      });
+      const idx = allDeployments.findIndex(d => d.id === id);
+      if (idx !== -1) allDeployments[idx].notes = value || null;
+    } catch { /* silently ignore */ }
+  }
+
+  async function assignType(id, value) {
+    try {
+      await fetch("/api/deployments/" + id + "/type", {
+        method: "PATCH",
+        headers: {"Content-Type": "application/json"},
+        body: JSON.stringify({deployment_type: value || null}),
+      });
+      const idx = allDeployments.findIndex(d => d.id === id);
+      if (idx !== -1) { allDeployments[idx].deployment_type = value || null; renderDashboard(); }
+    } catch { /* silently ignore — reverts on next full load */ }
   }
 
   function setSearch(value) {
@@ -362,7 +473,8 @@
             <div class="card-title">${escHtml(d.project_name)}</div>
             <div class="card-meta">
               <span class="platform-badge platform-badge-${d.platform}">${escHtml(d.platform)}</span>
-              ${d.created_at ? " · " + formatDate(d.created_at) : ""}
+              ${d.deployment_type ? ` <span class="type-badge type-badge-${d.deployment_type}">${d.deployment_type}</span>` : ""}
+              ${d.created_at ? ` · <span title="${escHtml(formatDate(d.created_at))}">${relativeTime(d.created_at)}</span>` : ""}
             </div>
           </div>
           <div style="display:flex;align-items:center;gap:.5rem;">
@@ -400,8 +512,21 @@
           <div style="margin-top:.3rem;font-size:11px;color:var(--text-muted);">
             ℹ Auto-deploy on push requires the Vercel GitHub App (Vercel dashboard → Integrations → GitHub).
           </div>` : ""}
-        <div style="margin-top:.4rem;font-size:12px;color:var(--text-muted);display:flex;align-items:center;gap:.4rem;">
-          Project: ${projectSelector(d)}
+        <div style="margin-top:.4rem;font-size:12px;color:var(--text-muted);display:flex;align-items:center;gap:.75rem;flex-wrap:wrap;">
+          <span>Project: ${projectSelector(d)}</span>
+          <span>Type: <select style="font-size:12px;border:1px solid var(--border);border-radius:4px;
+                                      padding:.15rem .35rem;background:var(--surface);color:var(--text);cursor:pointer;"
+                              onchange="assignType(${d.id}, this.value)">
+            <option value="" ${!d.deployment_type ? "selected" : ""}>— unknown —</option>
+            <option value="static" ${d.deployment_type === "static" ? "selected" : ""}>Static</option>
+            <option value="backend" ${d.deployment_type === "backend" ? "selected" : ""}>Backend</option>
+          </select></span>
+        </div>
+        <div style="margin-top:.5rem;">
+          <textarea rows="2" placeholder="Notes…"
+            style="width:100%;box-sizing:border-box;font-size:12px;border:1px solid var(--border);border-radius:6px;
+                   padding:.35rem .5rem;background:var(--surface);color:var(--text);resize:vertical;"
+            onblur="saveNotes(${d.id}, this.value)">${escHtml(d.notes || "")}</textarea>
         </div>
         <div style="margin-top:.4rem;display:flex;gap:.4rem;flex-wrap:wrap;">
           <button class="btn btn-secondary" style="padding:.2rem .55rem;font-size:12px;"
@@ -457,9 +582,13 @@
   function updateStats() {
     const bar = document.getElementById("stats-bar");
     if (!bar) return;
-    if (!allDeployments.length) { bar.innerHTML = ""; return; }
+    if (!allDeployments.length) { bar.innerHTML = ""; document.title = "Auto Deploy"; return; }
     const live   = allDeployments.filter(d => ["ready","deployed"].includes((d.status||"").toLowerCase())).length;
     const active = allDeployments.filter(d => PENDING_STATUSES.has((d.status||"").toLowerCase())).length;
+    const failed = allDeployments.filter(d => ["failed","error","deployment_failed"].includes((d.status||"").toLowerCase())).length;
+
+    document.title = active ? `(${active} deploying) Auto Deploy` : "Auto Deploy";
+
     let html = `<div class="stats-widget">
       <div class="stats-widget-item">
         <div class="stats-widget-value">${allDeployments.length}</div>
@@ -477,6 +606,13 @@
         <div class="stats-widget-label">Deploying</div>
       </div>`;
     }
+    if (failed) {
+      html += `<div class="stats-widget-divider"></div>
+      <div class="stats-widget-item" style="cursor:pointer;" onclick="setStatusFilter(statusFilter === 'failed' ? '' : 'failed')" title="Click to filter failed">
+        <div class="stats-widget-value" style="color:#ff5252;">${failed}</div>
+        <div class="stats-widget-label">Failed</div>
+      </div>`;
+    }
     html += `</div>`;
     bar.innerHTML = html;
   }
@@ -488,6 +624,8 @@
     // Platform + search filter (client-side)
     const filtered = allDeployments.filter(d =>
       (selectedPlatforms.size === 0 || selectedPlatforms.has(d.platform)) &&
+      (typeFilter === "" || d.deployment_type === typeFilter) &&
+      (statusFilter === "" || (d.status || "").toLowerCase().includes(statusFilter)) &&
       matchesSearch(d)
     );
 
@@ -562,6 +700,7 @@
       allDeployments = await depResp.json();
       updateProjectFilterSelect();
       renderDashboard();
+      requestNotificationPermission();
     } catch {
       document.getElementById("deployments-list").innerHTML =
         '<div class="alert alert-error">Failed to load. Is the server running?</div>';
@@ -749,6 +888,7 @@
   async function syncDeployment(id) {
     const badge = document.getElementById("badge-" + id);
     const msg = document.getElementById("msg-" + id);
+    const prevStatus = (allDeployments.find(d => d.id === id)?.status || "").toLowerCase();
     if (badge) badge.textContent = "syncing…";
     try {
       const resp = await fetch("/api/deployments/" + id + "/sync", {method: "POST"});
@@ -757,12 +897,16 @@
         if (msg) msg.innerHTML = '<span style="color:var(--danger)">' + escHtml(data.detail || "Sync failed") + "</span>";
         if (badge) badge.textContent = "error";
       } else {
+        const newStatus = (data.status || "").toLowerCase();
+        if (PENDING_STATUSES.has(prevStatus) && !PENDING_STATUSES.has(newStatus)) {
+          notifyDeployComplete(data.project_name, newStatus);
+        }
         const idx = allDeployments.findIndex(d => d.id === id);
         if (idx !== -1) allDeployments[idx] = data;
         renderDashboard();
         const newMsg = document.getElementById("msg-" + id);
         if (newMsg) newMsg.innerHTML = '<span style="color:var(--text-muted)">Synced ' + formatDate(new Date().toISOString()) + "</span>";
-        if (PENDING_STATUSES.has((data.status || "").toLowerCase())) startPolling(id);
+        if (PENDING_STATUSES.has(newStatus)) startPolling(id);
         else stopPolling(id);
       }
     } catch {

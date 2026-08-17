@@ -354,6 +354,22 @@ h2 { font-size: 18px; font-weight: 600; letter-spacing: -.2px; margin-bottom: .9
 .platform-badge-render  { background: var(--render-color);  color: #fff; }
 [data-theme="dark"] .platform-badge-vercel { color: #1c1c1e; }
 
+/* ── Deployment type badges ───────────────────────────────────────────────── */
+.type-badge {
+  display: inline-flex;
+  align-items: center;
+  padding: .2rem .55rem;
+  border-radius: 20px;
+  font-size: 11px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: .05em;
+}
+.type-badge-static  { background: #e0f2fe; color: #0369a1; }
+.type-badge-backend { background: #f3e8ff; color: #7c3aed; }
+[data-theme="dark"] .type-badge-static  { background: #0c2a3d; color: #7dd3fc; }
+[data-theme="dark"] .type-badge-backend { background: #1e0a40; color: #c4b5fd; }
+
 /* ── Project sections ─────────────────────────────────────────────────────── */
 .project-section-header {
   display: flex;

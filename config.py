@@ -12,6 +12,7 @@ class Settings(BaseSettings):
     secret_key: str = "change-me-to-a-random-secret-string"
     app_name: str = "Auto Deploy"
     debug: bool = False
+    app_password: str = ""  # empty = auth disabled (local dev)
 
 
 settings = Settings()

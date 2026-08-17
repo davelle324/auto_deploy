@@ -20,11 +20,19 @@ from schemas import (
     DeploymentCreate,
     DeploymentEventResponse,
     DeploymentResponse,
+    DeploymentNotesUpdate,
+    DeploymentTypeUpdate,
 )
 from security import decrypt_token
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/api/deployments", tags=["deployments"])
+
+_PLATFORM_TYPE_DEFAULTS = {
+    Platform.VERCEL: "static",
+    Platform.NETLIFY: "static",
+    Platform.RENDER: "static",
+}
 
 
 async def _get_decrypted_token(platform: Platform, db: AsyncSession) -> str:
@@ -90,6 +98,7 @@ async def create_deployment(data: DeploymentCreate, db: AsyncSession = Depends(g
         url=result.url,
         status=result.status,
         repo_url=data.repo_url,
+        deployment_type=data.deployment_type or result.deployment_type or _PLATFORM_TYPE_DEFAULTS.get(data.platform),
     )
     db.add(deployment)
     await db.flush()
@@ -210,6 +219,7 @@ async def import_from_platform(
             url=item.url,
             status=item.status,
             repo_url=item.repo_url,
+            deployment_type=item.deployment_type or _PLATFORM_TYPE_DEFAULTS.get(platform),
         )
         db.add(deployment)
         existing_names.add(item.project_name)
@@ -415,6 +425,40 @@ async def update_build_settings(
     except Exception as exc:
         raise HTTPException(status_code=502, detail=str(exc)) from exc
     return {"message": "Build settings applied — redeploy to activate"}
+
+
+@router.patch("/{deployment_id}/type", response_model=DeploymentResponse)
+async def set_deployment_type(
+    deployment_id: int, data: DeploymentTypeUpdate, db: AsyncSession = Depends(get_db)
+):
+    """Set or clear the deployment type (static / backend)."""
+    result = await db.execute(
+        select(Deployment).where(Deployment.id == deployment_id)
+    )
+    deployment = result.scalar_one_or_none()
+    if not deployment:
+        raise HTTPException(status_code=404, detail="Deployment not found")
+    deployment.deployment_type = data.deployment_type
+    await db.commit()
+    await db.refresh(deployment)
+    return deployment
+
+
+@router.patch("/{deployment_id}/notes", response_model=DeploymentResponse)
+async def set_deployment_notes(
+    deployment_id: int, data: DeploymentNotesUpdate, db: AsyncSession = Depends(get_db)
+):
+    """Update the personal notes for a deployment."""
+    result = await db.execute(
+        select(Deployment).where(Deployment.id == deployment_id)
+    )
+    deployment = result.scalar_one_or_none()
+    if not deployment:
+        raise HTTPException(status_code=404, detail="Deployment not found")
+    deployment.notes = data.notes
+    await db.commit()
+    await db.refresh(deployment)
+    return deployment
 
 
 @router.delete("/{deployment_id}/untrack")

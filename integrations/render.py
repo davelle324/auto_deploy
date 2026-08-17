@@ -117,12 +117,19 @@ class RenderClient(BasePlatformClient):
                 continue
             suspended = service.get("suspended", "not_suspended")
             status = "suspended" if suspended == "suspended" else "ready"
+            svc_type = service.get("type", "")
+            deployment_type = (
+                "static" if svc_type == "static_site"
+                else "backend" if svc_type == "web_service"
+                else None
+            )
             results.append(
                 DeployResult(
                     platform_deployment_id=service_id,
                     url=self._extract_url(service),
                     status=status,
                     project_name=service.get("name", ""),
+                    deployment_type=deployment_type,
                 )
             )
         return results

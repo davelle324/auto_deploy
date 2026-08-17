@@ -85,6 +85,7 @@ class NetlifyClient(BasePlatformClient):
                     url=url,
                     status=normalize_status(site.get("state", "unknown")),
                     project_name=site.get("name", ""),
+                    deployment_type="static",
                 )
             )
         return results
