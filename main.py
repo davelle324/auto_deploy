@@ -13,7 +13,7 @@ from starlette.middleware.sessions import SessionMiddleware
 
 from config import settings
 from database import init_db
-from routers import deployments, domains, env_vars, projects, tokens, webhooks
+from routers import demo, deployments, domains, env_vars, projects, tokens, webhooks
 
 
 @asynccontextmanager
@@ -30,19 +30,21 @@ class AuthMiddleware(BaseHTTPMiddleware):  # pylint: disable=too-few-public-meth
         if not settings.app_password:
             return await call_next(request)
         path = request.url.path
-        if path.startswith("/login") or path.startswith("/static"):
+        if path.startswith("/login") or path.startswith("/static") or path.startswith("/demo"):
             return await call_next(request)
         if not request.session.get("authenticated"):
             if path.startswith("/api/"):
                 return JSONResponse({"detail": "Unauthorized"}, status_code=401)
-            return RedirectResponse("/login")
+            return RedirectResponse("/demo")
         return await call_next(request)
 
 
 app = FastAPI(title=settings.app_name, lifespan=lifespan)
 
 app.add_middleware(AuthMiddleware)
-app.add_middleware(SessionMiddleware, secret_key=settings.secret_key, https_only=False)
+app.add_middleware(
+    SessionMiddleware, secret_key=settings.secret_key, https_only=False, max_age=3600
+)
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["http://localhost:8000", "http://127.0.0.1:8000"],
@@ -53,6 +55,7 @@ app.add_middleware(
 app.mount("/static", StaticFiles(directory="static"), name="static")
 templates = Jinja2Templates(directory="templates")
 
+app.include_router(demo.router)
 app.include_router(tokens.router)
 app.include_router(deployments.router)
 app.include_router(projects.router)
@@ -96,3 +99,28 @@ async def deploy_page(request: Request):
 async def settings_page(request: Request):
     """Render the platform token settings page."""
     return templates.TemplateResponse(request, "settings.html")
+
+
+@app.get("/logout")
+async def logout(request: Request):
+    """Clear the session and redirect to the demo."""
+    request.session.clear()
+    return RedirectResponse("/demo")
+
+
+@app.get("/demo", response_class=HTMLResponse)
+async def demo_dashboard(request: Request):
+    """Render the demo deployments dashboard with fake data."""
+    return templates.TemplateResponse(request, "index.html", {"demo": True})
+
+
+@app.get("/demo/deploy", response_class=HTMLResponse)
+async def demo_deploy_page(request: Request):
+    """Render the demo new deployment form."""
+    return templates.TemplateResponse(request, "deploy.html", {"demo": True})
+
+
+@app.get("/demo/settings", response_class=HTMLResponse)
+async def demo_settings_page(request: Request):
+    """Render the demo platform token settings page."""
+    return templates.TemplateResponse(request, "settings.html", {"demo": True})

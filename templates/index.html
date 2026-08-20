@@ -11,7 +11,7 @@
 </div>
 
 <div class="action-bar">
-  <a href="/deploy" class="btn btn-primary">+ New Deployment</a>
+  <a href="{{ '/demo/deploy' if demo else '/deploy' }}" class="btn btn-primary">+ New Deployment</a>
   <button class="btn btn-secondary" onclick="loadAll()">↻ Refresh</button>
   <button class="btn btn-secondary" id="sync-all-btn" onclick="syncAll()">↻ Sync All</button>
   <span id="sync-all-msg" style="font-size:13px;color:var(--text-muted);"></span>
@@ -748,7 +748,7 @@
         : `<div class="empty-state">
             <span class="empty-state-icon">🚀</span>
             <p>No deployments yet. Create your first one to get started.</p>
-            <a href="/deploy" class="btn btn-primary">+ New Deployment</a>
+            <a href="${window._DEPLOY_HREF}" class="btn btn-primary">+ New Deployment</a>
           </div>`;
     }
 

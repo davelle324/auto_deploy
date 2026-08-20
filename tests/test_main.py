@@ -113,7 +113,7 @@ async def test_auth_middleware_html_unauthenticated_redirects(client):
     try:
         resp = await client.get("/", follow_redirects=False)
         assert resp.status_code in (302, 307)
-        assert "/login" in resp.headers["location"]
+        assert "/demo" in resp.headers["location"]
     finally:
         settings.app_password = old
 
@@ -137,5 +137,20 @@ async def test_auth_middleware_authenticated_passes_through(client):
         await client.post("/login", data={"password": "testpass"})
         resp = await client.get("/api/deployments/")
         assert resp.status_code == 200
+    finally:
+        settings.app_password = old
+
+
+@pytest.mark.asyncio
+async def test_logout_clears_session(client):
+    old = settings.app_password
+    settings.app_password = "testpass"
+    try:
+        await client.post("/login", data={"password": "testpass"})
+        assert (await client.get("/api/deployments/")).status_code == 200
+        resp = await client.get("/logout", follow_redirects=False)
+        assert resp.status_code in (302, 307)
+        assert "/demo" in resp.headers["location"]
+        assert (await client.get("/api/deployments/")).status_code == 401
     finally:
         settings.app_password = old

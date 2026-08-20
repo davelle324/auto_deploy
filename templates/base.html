@@ -16,16 +16,41 @@
   </script>
 </head>
 <body>
+{% if demo %}
+  <div style="background:#f59e0b;color:#1c1917;text-align:center;padding:.45rem 1rem;font-size:13px;font-weight:500;">
+    Demo mode — all data is fake and nothing you do here is real.
+    <a href="/login" style="color:#1c1917;font-weight:700;margin-left:1rem;text-decoration:underline;">Login to use the real app →</a>
+    <button onclick="fetch('/demo/api/reset',{method:'POST'}).then(()=>location.reload())"
+      style="background:none;border:none;cursor:pointer;color:#1c1917;font-weight:700;margin-left:1rem;text-decoration:underline;font-size:13px;padding:0;">
+      Reset demo ↺
+    </button>
+  </div>
+  <script>
+    (function () {
+      var _f = window.fetch.bind(window);
+      window.fetch = function (url, opts) {
+        if (typeof url === 'string' && url.startsWith('/api/')) { url = '/demo' + url; }
+        return _f(url, opts);
+      };
+    })();
+    window._DEPLOY_HREF = '/demo/deploy';
+  </script>
+{% else %}
+  <script>window._DEPLOY_HREF = '/deploy';</script>
+{% endif %}
   <nav class="navbar">
-    <a href="/" class="brand">
+    <a href="{{ '/demo' if demo else '/' }}" class="brand">
       <span class="brand-mark">⚡</span>
       Auto Deploy
     </a>
     <div class="nav-links">
-      <a href="/">Dashboard</a>
-      <a href="/deploy">+ Deploy</a>
-      <a href="/settings">Settings</a>
+      <a href="{{ '/demo' if demo else '/' }}">Dashboard</a>
+      <a href="{{ '/demo/deploy' if demo else '/deploy' }}">+ Deploy</a>
+      <a href="{{ '/demo/settings' if demo else '/settings' }}">Settings</a>
     </div>
+    {% if not demo %}
+    <a href="/logout" class="btn btn-secondary" style="font-size:13px;padding:.3rem .7rem;">Sign out</a>
+    {% endif %}
     <button class="btn-theme" id="theme-toggle" onclick="toggleTheme()" title="Toggle dark mode"></button>
   </nav>
   <main class="container">

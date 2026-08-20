@@ -44,7 +44,8 @@ A self-hosted web dashboard for deploying and managing websites across Vercel, N
 ### Security
 - Encrypted token storage (Fernet + SHA-256 key derivation)
 - Tokens never returned in API responses
-- Optional single-password login (`APP_PASSWORD`) with session cookies
+- Optional single-password login (`APP_PASSWORD`) with session cookies (1-hour expiry)
+- **Demo mode** at `/demo` — fully functional UI backed by fake data; real `/api/*` routes remain blocked to unauthenticated users
 
 ## Installation
 
