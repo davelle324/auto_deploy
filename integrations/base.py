@@ -95,8 +95,14 @@ class BasePlatformClient(ABC):
     """Common interface that every platform client must implement."""
 
     @abstractmethod
-    async def create_deployment(
-        self, project_name: str, repo_url: Optional[str] = None
+    async def create_deployment(  # pylint: disable=too-many-arguments,too-many-positional-arguments
+        self,
+        project_name: str,
+        repo_url: Optional[str] = None,
+        deployment_type: Optional[str] = None,
+        start_command: Optional[str] = None,
+        render_runtime: Optional[str] = None,
+        build_command: Optional[str] = None,
     ) -> DeployResult:
         """Create a new project and trigger an initial deployment."""
 

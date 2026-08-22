@@ -38,9 +38,39 @@
       <label for="deployment_type">Type</label>
       <select id="deployment_type" name="deployment_type">
         <option value="">— unknown —</option>
-        <option value="static">Static</option>
-        <option value="backend">Backend</option>
+        <option value="static">Static Site</option>
+        <option value="backend">Web Service</option>
       </select>
+    </div>
+
+    <!-- Render web service fields (shown when platform=render AND type=backend) -->
+    <div id="web-service-section" style="display:none;">
+      <div class="form-group">
+        <label for="render_runtime">Runtime</label>
+        <select id="render_runtime" name="render_runtime">
+          <option value="docker">Docker (Dockerfile)</option>
+          <option value="python">Python</option>
+          <option value="node">Node</option>
+          <option value="go">Go</option>
+          <option value="ruby">Ruby</option>
+          <option value="elixir">Elixir</option>
+          <option value="rust">Rust</option>
+        </select>
+      </div>
+      <div class="form-group">
+        <label for="ws_build_command">Build Command</label>
+        <input type="text" id="ws_build_command" name="ws_build_command"
+               placeholder="pip install -r requirements.txt"
+               style="font-family:monospace;">
+        <p class="form-hint">Runs before the service starts. Leave blank to use the default for the selected runtime.</p>
+      </div>
+      <div class="form-group">
+        <label for="start_command">Start Command</label>
+        <input type="text" id="start_command" name="start_command"
+               placeholder="python app.py"
+               style="font-family:monospace;">
+        <p class="form-hint">Command Render runs to start your web service.</p>
+      </div>
     </div>
 
     <div class="form-group">
@@ -91,7 +121,7 @@
       <!-- Build config (Render only) -->
       <div id="build-config-section" style="display:none;border-top:1px solid var(--border);padding-top:.75rem;
            flex-direction:column;gap:.5rem;">
-        <label style="font-size:13px;font-weight:600;margin:0;">Build Config <span style="font-weight:400;color:var(--text-muted);">(Render)</span></label>
+        <label style="font-size:13px;font-weight:600;margin:0;">Build Config <span style="font-weight:400;color:var(--text-muted);">(Render only)</span></label>
         <input id="adv-build-cmd" type="text" placeholder="bash build.sh"
                style="border:1px solid var(--border);border-radius:6px;padding:.4rem .65rem;
                       font-size:13px;font-family:monospace;background:var(--surface);color:var(--text);">
@@ -168,13 +198,57 @@
     return result;
   }
 
+  const _WS_BUILD_DEFAULTS = {
+    python:  "pip install -r requirements.txt",
+    node:    "npm install",
+    go:      "go build ./...",
+    ruby:    "bundle install",
+    elixir:  "mix deps.get && mix compile",
+    rust:    "cargo build --release",
+    docker:  "",
+  };
+
+  function updateRenderWebServiceSection() {
+    const platform = document.getElementById("platform").value;
+    const depType = document.getElementById("deployment_type").value;
+    const isWebService = platform === "render" && depType === "backend";
+    document.getElementById("web-service-section").style.display = isWebService ? "block" : "none";
+    // Build config (with CORS toggle) is only relevant for static sites
+    document.getElementById("build-config-section").style.display =
+      (platform === "render" && !isWebService) ? "flex" : "none";
+  }
+
+  document.getElementById("render_runtime").addEventListener("change", function () {
+    const buildInput = document.getElementById("ws_build_command");
+    const def = _WS_BUILD_DEFAULTS[this.value] || "";
+    // Update placeholder so the user always sees the runtime's default
+    buildInput.placeholder = def || "(none needed for Docker)";
+    // Only auto-fill the value if the user hasn't typed something custom
+    const knownDefaults = new Set(Object.values(_WS_BUILD_DEFAULTS));
+    if (!buildInput.value || knownDefaults.has(buildInput.value)) {
+      buildInput.value = def;
+    }
+  });
+
   // Auto-set type and show/hide platform-specific UI when platform changes
   document.getElementById("platform").addEventListener("change", function () {
-    document.getElementById("build-config-section").style.display = this.value === "render" ? "flex" : "none";
     document.getElementById("netlify-note").style.display = this.value === "netlify" ? "block" : "none";
     const typeEl = document.getElementById("deployment_type");
     if (this.value === "vercel" || this.value === "netlify") typeEl.value = "static";
-    else if (this.value === "render") typeEl.value = "";
+    else if (this.value === "render") typeEl.value = "static";
+    updateRenderWebServiceSection();
+  });
+
+  document.getElementById("deployment_type").addEventListener("change", function () {
+    updateRenderWebServiceSection();
+    // Pre-fill build command when switching to web service
+    if (document.getElementById("platform").value === "render" && this.value === "backend") {
+      const runtime = document.getElementById("render_runtime").value || "docker";
+      const def = _WS_BUILD_DEFAULTS[runtime] || "";
+      const buildInput = document.getElementById("ws_build_command");
+      buildInput.placeholder = def || "(none needed for Docker)";
+      if (!buildInput.value) buildInput.value = def;
+    }
   });
 
   // ── Projects ──────────────────────────────────────────────────────────────
@@ -208,16 +282,34 @@
     const repo_url        = document.getElementById("repo_url").value.trim() || null;
     const project_id      = document.getElementById("project_id").value;
     const deployment_type = document.getElementById("deployment_type").value || null;
+    const start_command   = (document.getElementById("start_command")?.value || "").trim() || null;
+    const render_runtime  = document.getElementById("render_runtime")?.value || null;
     const envVars      = collectEnvVars();
-    const buildCmd     = (document.getElementById("adv-build-cmd")?.value || "").trim();
+    // Web services use the visible build command field; static sites use the Advanced section field
+    const isWebService = platform === "render" && deployment_type === "backend";
+    const buildCmd     = isWebService
+      ? (document.getElementById("ws_build_command")?.value || "").trim()
+      : (document.getElementById("adv-build-cmd")?.value || "").trim();
     const applyCors    = document.getElementById("adv-cors-checkbox")?.checked ?? false;
+
+    // Validate: non-Docker Render web services must have a build command
+    if (isWebService && render_runtime && render_runtime !== "docker" && !buildCmd) {
+      showAlert(
+        `Build command is required for ${render_runtime} web services on Render ` +
+        `(e.g. <code>bash build.sh</code> or <code>pip install -r requirements.txt</code>).`,
+        "error"
+      );
+      btn.disabled = false;
+      btn.textContent = "Deploy";
+      return;
+    }
 
     try {
       // 1. Create deployment
       const resp = await fetch("/api/deployments/", {
         method: "POST",
         headers: {"Content-Type": "application/json"},
-        body: JSON.stringify({platform, project_name, repo_url, deployment_type}),
+        body: JSON.stringify({platform, project_name, repo_url, deployment_type, start_command, render_runtime, build_command: buildCmd || null}),
       });
       const data = await resp.json();
 

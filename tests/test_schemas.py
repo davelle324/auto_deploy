@@ -42,3 +42,18 @@ def test_connect_repo_too_few_parts():
 def test_project_create_name_too_long():
     with pytest.raises(ValidationError):
         ProjectCreate(name="x" * 101)
+
+
+def test_deploy_create_render_runtime_none_allowed():
+    obj = DeploymentCreate(platform="render", project_name="my-app", render_runtime=None)
+    assert obj.render_runtime is None
+
+
+def test_deploy_create_render_runtime_valid():
+    obj = DeploymentCreate(platform="render", project_name="my-app", render_runtime="python")
+    assert obj.render_runtime == "python"
+
+
+def test_deploy_create_render_runtime_invalid():
+    with pytest.raises(ValidationError):
+        DeploymentCreate(platform="render", project_name="my-app", render_runtime="java")

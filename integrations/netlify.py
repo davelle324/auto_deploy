@@ -21,8 +21,14 @@ class NetlifyClient(BasePlatformClient):
             "Content-Type": "application/json",
         }
 
-    async def create_deployment(
-        self, project_name: str, repo_url: Optional[str] = None
+    async def create_deployment(  # pylint: disable=too-many-arguments,too-many-positional-arguments
+        self,
+        project_name: str,
+        repo_url: Optional[str] = None,
+        deployment_type: Optional[str] = None,  # pylint: disable=unused-argument
+        start_command: Optional[str] = None,  # pylint: disable=unused-argument
+        render_runtime: Optional[str] = None,  # pylint: disable=unused-argument
+        build_command: Optional[str] = None,  # pylint: disable=unused-argument
     ) -> DeployResult:
         """Create a Netlify site, optionally connected to a GitHub repo."""
         site_payload: dict = {"name": project_name}

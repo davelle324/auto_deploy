@@ -172,8 +172,14 @@ class VercelClient(BasePlatformClient):
         """Best-effort project deletion — ignores 404 (already gone)."""
         await safe_delete(client, f"{VERCEL_API}/v9/projects/{project_name}", self._headers)
 
-    async def create_deployment(
-        self, project_name: str, repo_url: Optional[str] = None
+    async def create_deployment(  # pylint: disable=too-many-arguments,too-many-positional-arguments,too-many-locals
+        self,
+        project_name: str,
+        repo_url: Optional[str] = None,
+        deployment_type: Optional[str] = None,  # pylint: disable=unused-argument
+        start_command: Optional[str] = None,  # pylint: disable=unused-argument
+        render_runtime: Optional[str] = None,  # pylint: disable=unused-argument
+        build_command: Optional[str] = None,  # pylint: disable=unused-argument
     ) -> DeployResult:
         """Create a Vercel project and trigger an initial deployment."""
         async with httpx.AsyncClient() as client:

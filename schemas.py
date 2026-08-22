@@ -37,6 +37,9 @@ class TokenResponse(BaseModel):
     model_config = {"from_attributes": True}
 
 
+_RENDER_RUNTIMES = {"python", "node", "go", "ruby", "elixir", "rust", "docker"}
+
+
 class DeploymentCreate(BaseModel):
     """Request body for creating a new deployment."""
 
@@ -44,6 +47,21 @@ class DeploymentCreate(BaseModel):
     project_name: str
     repo_url: Optional[str] = None
     deployment_type: Optional[str] = None
+    start_command: Optional[str] = None
+    render_runtime: Optional[str] = None
+    build_command: Optional[str] = None
+
+    @field_validator("render_runtime")
+    @classmethod
+    def validate_render_runtime(cls, v: Optional[str]) -> Optional[str]:
+        """Accept only known Render runtimes."""
+        if v is None:
+            return v
+        if v not in _RENDER_RUNTIMES:
+            raise ValueError(
+                f"render_runtime must be one of: {', '.join(sorted(_RENDER_RUNTIMES))}"
+            )
+        return v
 
     @field_validator("project_name")
     @classmethod

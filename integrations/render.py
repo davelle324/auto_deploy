@@ -1,5 +1,6 @@
 """Render REST API client."""
 
+import logging
 from typing import Optional
 
 import httpx
@@ -7,6 +8,8 @@ import httpx
 from integrations.base import (
     BasePlatformClient, DeployResult, build_result, normalize_status, safe_delete,
 )
+
+logger = logging.getLogger(__name__)
 
 RENDER_API = "https://api.render.com/v1"
 
@@ -43,10 +46,82 @@ class RenderClient(BasePlatformClient):
             return None
         return raw if raw.startswith("https://") else f"https://{raw}"
 
-    async def create_deployment(
-        self, project_name: str, repo_url: Optional[str] = None
+    # Default versions for native-runtime web services.
+    # Docker services don't need envSpecificDetails; all others do.
+    # Fallback build commands used when the user leaves the field blank.
+    _RUNTIME_BUILD_DEFAULTS: dict[str, str] = {
+        "python":  "pip install -r requirements.txt",
+        "node":    "npm install",
+        "go":      "go build ./...",
+        "ruby":    "bundle install",
+        "elixir":  "mix deps.get && mix compile",
+        "rust":    "cargo build --release",
+    }
+
+    @staticmethod
+    def _build_service_payload(
+        project_name: str, owner_id: str, repo_url: str, opts: dict
+    ) -> dict:
+        """Return the JSON payload for a Render service creation request."""
+        if opts.get("deployment_type") == "backend":
+            runtime = opts.get("render_runtime") or "docker"
+            build_cmd = (
+                opts.get("build_command")
+                or RenderClient._RUNTIME_BUILD_DEFAULTS.get(runtime, "")
+            )
+            # buildCommand and startCommand live inside envSpecificDetails for
+            # native-runtime web services (Render API v1 schema requirement).
+            env_specific: dict = {
+                "buildCommand": build_cmd,
+                "startCommand": opts.get("start_command") or "",
+            }
+            return {
+                "type": "web_service",
+                "name": project_name,
+                "ownerId": owner_id,
+                "repo": repo_url,
+                "branch": "main",
+                "serviceDetails": {
+                    "env": runtime,
+                    "plan": "free",
+                    "region": "oregon",
+                    "envSpecificDetails": env_specific,
+                },
+            }
+        return {
+            "type": "static_site",
+            "name": project_name,
+            "ownerId": owner_id,
+            "repo": repo_url,
+            "branch": "main",
+            "buildCommand": None,
+            "serviceDetails": {"publishPath": "."},
+        }
+
+    async def _fetch_url_after_create(
+        self, client: httpx.AsyncClient, service_id: str, initial_url: Optional[str]
+    ) -> Optional[str]:
+        """Fetch the public URL for a newly created service if not yet assigned."""
+        if initial_url or not service_id:
+            return initial_url
+        get_resp = await client.get(
+            f"{RENDER_API}/services/{service_id}", headers=self._headers
+        )
+        if get_resp.status_code == 200:
+            d = get_resp.json()
+            return self._extract_url(d.get("service", d))
+        return None
+
+    async def create_deployment(  # pylint: disable=too-many-arguments,too-many-positional-arguments
+        self,
+        project_name: str,
+        repo_url: Optional[str] = None,
+        deployment_type: Optional[str] = None,
+        start_command: Optional[str] = None,
+        render_runtime: Optional[str] = None,
+        build_command: Optional[str] = None,
     ) -> DeployResult:
-        """Create a Render static site service. Requires a GitHub repo URL."""
+        """Create a Render service (static site or web service). Requires a GitHub repo URL."""
         if not repo_url:
             return DeployResult(
                 platform_deployment_id="pending",
@@ -55,37 +130,32 @@ class RenderClient(BasePlatformClient):
                 project_name=project_name,
             )
 
+        opts = {
+            "deployment_type": deployment_type,
+            "start_command": start_command,
+            "render_runtime": render_runtime,
+            "build_command": build_command,
+        }
         async with httpx.AsyncClient() as client:
             owner_id = await self._fetch_owner_id(client)
+            payload = self._build_service_payload(project_name, owner_id, repo_url, opts)
+            logger.info("Render create-service payload: %s", payload)
             resp = await client.post(
-                f"{RENDER_API}/services",
-                headers=self._headers,
-                json={
-                    "type": "static_site",
-                    "name": project_name,
-                    "ownerId": owner_id,
-                    "repo": repo_url,
-                    "branch": "main",
-                    "buildCommand": None,
-                    "serviceDetails": {"publishPath": "."},
-                },
+                f"{RENDER_API}/services", headers=self._headers, json=payload
             )
-            resp.raise_for_status()
-            data = resp.json()
-
-            service = data.get("service", {})
-            service_id = service.get("id", "")
-            url = self._extract_url(service)
-
-            # URL may be null right after creation — try a follow-up GET.
-            if not url and service_id:
-                get_resp = await client.get(
-                    f"{RENDER_API}/services/{service_id}",
-                    headers=self._headers,
+            if not resp.is_success:
+                svc = payload.get("serviceDetails", {})
+                raise ValueError(
+                    f"Render API {resp.status_code}: {resp.text} "
+                    f"[svc.buildCommand={svc.get('buildCommand')!r}, "
+                    f"svc.env={svc.get('env')!r}, "
+                    f"top.buildCommand={payload.get('buildCommand')!r}]"
                 )
-                if get_resp.status_code == 200:
-                    d = get_resp.json()
-                    url = self._extract_url(d.get("service", d))
+            service = resp.json().get("service", {})
+            service_id = service.get("id", "")
+            url = await self._fetch_url_after_create(
+                client, service_id, self._extract_url(service)
+            )
 
             if service_id:
                 return build_result(

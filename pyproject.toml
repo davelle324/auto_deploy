@@ -44,6 +44,7 @@ omit = [
     "tests/*",
     "htmlcov/*",
     "sample_site/*",
+    "test_render_api.py",
 ]
 
 [tool.coverage.report]

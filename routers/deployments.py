@@ -69,7 +69,14 @@ async def create_deployment(data: DeploymentCreate, db: AsyncSession = Depends(g
     client = _build_client(data.platform, token)
 
     try:
-        result = await client.create_deployment(data.project_name, data.repo_url)
+        result = await client.create_deployment(
+            data.project_name,
+            data.repo_url,
+            deployment_type=data.deployment_type,
+            start_command=data.start_command,
+            render_runtime=data.render_runtime,
+            build_command=data.build_command,
+        )
     except PartialDeployError as exc:
         # Project was created on the platform but deployment failed (e.g. GitHub App
         # not installed).  Save the partial record so it appears in the dashboard,

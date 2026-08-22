@@ -930,6 +930,163 @@ async def test_render_list_deployments():
 
 
 @pytest.mark.asyncio
+async def test_render_create_web_service():
+    owners_resp = _mock_response([{"owner": {"id": "usr_abc123"}, "cursor": "x"}])
+    service_resp = _mock_response({
+        "service": {"id": "srv_ws001", "serviceDetails": {"url": "my-api.onrender.com"}}
+    })
+    mock_client = _make_async_client(
+        post_side_effect=[service_resp],
+        get_return=owners_resp,
+    )
+
+    with patch("integrations.render.httpx.AsyncClient", return_value=mock_client):
+        result = await RenderClient("fake-token").create_deployment(
+            "my-api",
+            repo_url="https://github.com/owner/repo",
+            deployment_type="backend",
+            start_command="python app.py",
+            render_runtime="python",
+        )
+
+    assert result.platform_deployment_id == "srv_ws001"
+    assert result.url == "https://my-api.onrender.com"
+    assert result.status == "deploying"
+    body = mock_client.post.call_args.kwargs["json"]
+    assert body["type"] == "web_service"
+    assert "buildCommand" not in body
+    assert "buildCommand" not in body["serviceDetails"]
+    assert body["serviceDetails"]["env"] == "python"
+    assert body["serviceDetails"]["plan"] == "free"
+    env_specific = body["serviceDetails"]["envSpecificDetails"]
+    assert env_specific["buildCommand"] == "pip install -r requirements.txt"
+    assert env_specific["startCommand"] == "python app.py"
+
+
+@pytest.mark.asyncio
+async def test_render_create_web_service_defaults_to_docker():
+    owners_resp = _mock_response([{"owner": {"id": "usr_abc123"}, "cursor": "x"}])
+    service_resp = _mock_response({
+        "service": {"id": "srv_ws002", "serviceDetails": {"url": "my-api.onrender.com"}}
+    })
+    mock_client = _make_async_client(
+        post_side_effect=[service_resp],
+        get_return=owners_resp,
+    )
+
+    with patch("integrations.render.httpx.AsyncClient", return_value=mock_client):
+        result = await RenderClient("fake-token").create_deployment(
+            "my-api",
+            repo_url="https://github.com/owner/repo",
+            deployment_type="backend",
+        )
+
+    assert result.status == "deploying"
+    body = mock_client.post.call_args.kwargs["json"]
+    assert body["type"] == "web_service"
+    assert "buildCommand" not in body
+    assert "buildCommand" not in body["serviceDetails"]
+    assert body["serviceDetails"]["env"] == "docker"
+    env_specific = body["serviceDetails"]["envSpecificDetails"]
+    assert env_specific["buildCommand"] == ""
+    assert env_specific["startCommand"] == ""
+
+
+@pytest.mark.asyncio
+async def test_render_web_service_uses_default_build_command_when_none_given():
+    owners_resp = _mock_response([{"owner": {"id": "usr_abc123"}, "cursor": "x"}])
+    service_resp = _mock_response({
+        "service": {"id": "srv_ws003", "serviceDetails": {"url": "my-api.onrender.com"}}
+    })
+    mock_client = _make_async_client(
+        post_side_effect=[service_resp],
+        get_return=owners_resp,
+    )
+
+    with patch("integrations.render.httpx.AsyncClient", return_value=mock_client):
+        await RenderClient("fake-token").create_deployment(
+            "my-api",
+            repo_url="https://github.com/owner/repo",
+            deployment_type="backend",
+            render_runtime="python",
+            # build_command intentionally omitted
+        )
+
+    body = mock_client.post.call_args.kwargs["json"]
+    assert "buildCommand" not in body
+    assert "buildCommand" not in body["serviceDetails"]
+    assert body["serviceDetails"]["envSpecificDetails"]["buildCommand"] == "pip install -r requirements.txt"
+
+
+@pytest.mark.asyncio
+async def test_render_create_static_site_when_type_not_backend():
+    owners_resp = _mock_response([{"owner": {"id": "usr_abc123"}, "cursor": "x"}])
+    service_resp = _mock_response({
+        "service": {"id": "srv_static01", "serviceDetails": {"url": "my-site.onrender.com"}}
+    })
+    mock_client = _make_async_client(
+        post_side_effect=[service_resp],
+        get_return=owners_resp,
+    )
+
+    with patch("integrations.render.httpx.AsyncClient", return_value=mock_client):
+        result = await RenderClient("fake-token").create_deployment(
+            "my-site",
+            repo_url="https://github.com/owner/repo",
+            deployment_type="static",
+        )
+
+    assert result.status == "deploying"
+    body = mock_client.post.call_args.kwargs["json"]
+    assert body["type"] == "static_site"
+    assert "publishPath" in body.get("serviceDetails", {})
+
+
+@pytest.mark.asyncio
+async def test_render_create_web_service_api_error_raises():
+    owners_resp = _mock_response([{"owner": {"id": "usr_abc123"}, "cursor": "x"}])
+    error_resp = _mock_response({"message": "bad request"}, status_code=400)
+    error_resp.is_success = False
+    mock_client = _make_async_client(
+        post_side_effect=[error_resp],
+        get_return=owners_resp,
+    )
+    with patch("integrations.render.httpx.AsyncClient", return_value=mock_client):
+        with pytest.raises(ValueError, match="Render API 400"):
+            await RenderClient("fake-token").create_deployment(
+                "my-api",
+                repo_url="https://github.com/owner/repo",
+                deployment_type="backend",
+                render_runtime="python",
+                build_command="pip install -r requirements.txt",
+                start_command="python app.py",
+            )
+
+
+@pytest.mark.asyncio
+async def test_render_fetch_url_after_create_non_200_returns_none():
+    owners_resp = _mock_response([{"owner": {"id": "usr_abc123"}, "cursor": "x"}])
+    service_resp = _mock_response({"service": {"id": "srv_ws999", "serviceDetails": {}}})
+    get_url_resp = _mock_response({}, status_code=404)
+    get_url_resp.is_success = False
+    mock_client = _make_async_client(
+        post_side_effect=[service_resp],
+        get_return=owners_resp,
+    )
+    mock_client.get = AsyncMock(side_effect=[owners_resp, get_url_resp])
+    with patch("integrations.render.httpx.AsyncClient", return_value=mock_client):
+        result = await RenderClient("fake-token").create_deployment(
+            "my-api",
+            repo_url="https://github.com/owner/repo",
+            deployment_type="backend",
+            render_runtime="python",
+            build_command="pip install -r requirements.txt",
+            start_command="python app.py",
+        )
+    assert result.url is None
+
+
+@pytest.mark.asyncio
 async def test_render_connect_repo_raises():
     with pytest.raises(ValueError, match="Render does not support"):
         await RenderClient("fake-token").connect_repo("srv_abc", "my-service", "https://github.com/o/r")
